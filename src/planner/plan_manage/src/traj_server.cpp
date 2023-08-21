@@ -43,9 +43,12 @@ void bsplineCallback(traj_utils::BsplineConstPtr msg)
     pos_pts(2, i) = msg->pos_pts[i].z;
   }
 
-  UniformBspline pos_traj(pos_pts, msg->order, 0.1);
-  pos_traj.setKnot(knots);
-
+  UniformBspline pos_traj(pos_pts, msg->order, 0.1); // 为啥我随便改interval不影响轨迹的执行效果？
+  pos_traj.setKnot(knots); // 好像是因为，这里直接会给u_赋值，把上面的interval_初始化u_的一步覆盖掉。
+  // 后面求微分啥的其实只是使用u_，没有用interval这个变量。尝试把setKnot这句话注释后仿真直接异常了，上面interval_赋0.1的一步没有任何意义。
+  // 所以时间分配这个工作前面已经做好了，后面的轨迹跟踪不能随意地改动前面的时间分配。
+  
+  // ？这里本来有接收yaw traj的代码？
   // parse yaw traj
 
   // Eigen::MatrixXd yaw_pts(msg->yaw_pts.size(), 1);
@@ -53,7 +56,7 @@ void bsplineCallback(traj_utils::BsplineConstPtr msg)
   //   yaw_pts(i, 0) = msg->yaw_pts[i];
   // }
 
-  //UniformBspline yaw_traj(yaw_pts, msg->order, msg->yaw_dt);
+  // UniformBspline yaw_traj(yaw_pts, msg->order, msg->yaw_dt);
 
   start_time_ = msg->start_time;
   traj_id_ = msg->traj_id;
@@ -179,6 +182,9 @@ void cmdCallback(const ros::TimerEvent &e)
     vel = traj_[1].evaluateDeBoorT(t_cur);
     acc = traj_[2].evaluateDeBoorT(t_cur);
 
+    // 只需要修改这里就ok了，把yaw角变成我们自己规划的一连串yaw角。
+    // 比如traj_server这个节点是用来接收B样条轨迹的，我们自己起一个节点，它接收B样条轨迹，在此基础上加上yaw角的规划。
+    // 然后它把B样条轨迹配套上yaw角的规划一并发过来。
     /*** calculate yaw ***/
     yaw_yawdot = calculate_yaw(t_cur, pos, time_now, time_last);
     /*** calculate yaw ***/
@@ -223,6 +229,8 @@ void cmdCallback(const ros::TimerEvent &e)
 
   cmd.yaw = yaw_yawdot.first;
   cmd.yaw_dot = yaw_yawdot.second;
+  // cmd.yaw = 0; // 一些无聊的更改
+  // cmd.yaw_dot = 0;  
 
   last_yaw_ = cmd.yaw;
 

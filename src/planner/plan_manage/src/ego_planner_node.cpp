@@ -2,6 +2,8 @@
 #include <visualization_msgs/Marker.h>
 
 #include <plan_manage/ego_replan_fsm.h>
+#include <thread> // 多线程头文件 
+#include <plan_manage/yaw_thread.h> // 我自己定义的yaw_thread
 
 using namespace ego_planner;
 
@@ -15,9 +17,14 @@ int main(int argc, char **argv)
 
   rebo_replan.init(nh);
 
+  // 加一个perception-aware的线程
+  int myArg = 0;
+  std::thread yaw_thread(computeYaw, myArg);
+
   // ros::Duration(1.0).sleep();
   ros::spin();
 
+  yaw_thread.join(); // 等待子线程完成
   return 0;
 }
 

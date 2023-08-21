@@ -9,7 +9,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
 
   /* get parameter */
   double x_size, y_size, z_size;
-  node_.param("grid_map/resolution", mp_.resolution_, -1.0);
+  node_.param("grid_map/resolution", mp_.resolution_, -1.0); // resolution默认是0.1，10cm？
   node_.param("grid_map/map_size_x", x_size, -1.0);
   node_.param("grid_map/map_size_y", y_size, -1.0);
   node_.param("grid_map/map_size_z", z_size, -1.0);
@@ -199,11 +199,11 @@ int GridMap::setCacheOccupancy(Eigen::Vector3d pos, int occ)
   posToIndex(pos, id);
   int idx_ctns = toAddress(id);
 
-  md_.count_hit_and_miss_[idx_ctns] += 1;
+  md_.count_hit_and_miss_[idx_ctns] += 1; // 是用于加速raycast用的变量，如何加速先不管
 
   if (md_.count_hit_and_miss_[idx_ctns] == 1)
   {
-    md_.cache_voxel_.push(id);
+    md_.cache_voxel_.push(id); // cache_voxel_为后面所用
   }
 
   if (occ == 1)
@@ -364,16 +364,16 @@ void GridMap::raycastProcess()
 
   for (int i = 0; i < md_.proj_points_cnt; ++i)
   {
-    pt_w = md_.proj_points_[i];
+    pt_w = md_.proj_points_[i]; // 遍历处理投影点
 
     // set flag for projected point
 
     if (!isInMap(pt_w))
-    {
-      pt_w = closetPointInMap(pt_w, md_.camera_pos_);
+    { 
+      pt_w = closetPointInMap(pt_w, md_.camera_pos_); // 如果投影点不在地图边界内，则将其替换为地图边界内最近的点
 
       length = (pt_w - md_.camera_pos_).norm();
-      if (length > mp_.max_ray_length_)
+      if (length > mp_.max_ray_length_) // 检查光线最大长度，如果超过就将点截断为最大长度光线上的点
       {
         pt_w = (pt_w - md_.camera_pos_) / length * mp_.max_ray_length_ + md_.camera_pos_;
       }
@@ -390,7 +390,7 @@ void GridMap::raycastProcess()
       }
       else
       {
-        vox_idx = setCacheOccupancy(pt_w, 1);
+        vox_idx = setCacheOccupancy(pt_w, 1); // 这个就是障碍点了
       }
     }
 
@@ -416,16 +416,16 @@ void GridMap::raycastProcess()
       }
     }
 
-    raycaster.setInput(pt_w / mp_.resolution_, md_.camera_pos_ / mp_.resolution_);
+    raycaster.setInput(pt_w / mp_.resolution_, md_.camera_pos_ / mp_.resolution_); // 将投影点和相机位置输入raycast
 
-    while (raycaster.step(ray_pt))
+    while (raycaster.step(ray_pt)) // 迭代计算相机位置和投影点之间光线上的点
     {
       Eigen::Vector3d tmp = (ray_pt + half) * mp_.resolution_;
       length = (tmp - md_.camera_pos_).norm();
 
       // if (length < mp_.min_ray_length_) break;
 
-      vox_idx = setCacheOccupancy(tmp, 0);
+      vox_idx = setCacheOccupancy(tmp, 0); // 显然相机到投影点之间的点不是障碍
 
       if (vox_idx != INVALID_IDX)
       {
@@ -455,11 +455,11 @@ void GridMap::raycastProcess()
   boundIndex(md_.local_bound_min_);
   boundIndex(md_.local_bound_max_);
 
-  md_.local_updated_ = true;
+  md_.local_updated_ = true; // 后面代码要判断的标志位
 
   // update occupancy cached in queue
   Eigen::Vector3d local_range_min = md_.camera_pos_ - mp_.local_update_range_;
-  Eigen::Vector3d local_range_max = md_.camera_pos_ + mp_.local_update_range_;
+  Eigen::Vector3d local_range_max = md_.camera_pos_ + mp_.local_update_range_; // grid的更新范围：以相机为中心的正方体
 
   Eigen::Vector3i min_id, max_id;
   posToIndex(local_range_min, min_id);
@@ -500,7 +500,7 @@ void GridMap::raycastProcess()
 
     md_.occupancy_buffer_[idx_ctns] =
         std::min(std::max(md_.occupancy_buffer_[idx_ctns] + log_odds_update, mp_.clamp_min_log_),
-                 mp_.clamp_max_log_);
+                 mp_.clamp_max_log_); // 这个就学长说的每次看到grid上有障碍就往上面加点概率
   }
 }
 
@@ -670,7 +670,7 @@ void GridMap::updateOccupancyCallback(const ros::TimerEvent & /*event*/)
     {
       ROS_ERROR("odom or depth lost! ros::Time::now()=%f, md_.last_occ_update_time_=%f, mp_.odom_depth_timeout_=%f", 
         ros::Time::now().toSec(), md_.last_occ_update_time_.toSec(), mp_.odom_depth_timeout_);
-      md_.flag_depth_odom_timeout_ = true;
+      md_.flag_depth_odom_timeout_ = true; // timeout为true表示里程计或深度图丢失
     }
     return;
   }

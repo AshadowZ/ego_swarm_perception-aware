@@ -781,7 +781,7 @@ namespace ego_planner
         pt.x = pos_pts(0, i);
         pt.y = pos_pts(1, i);
         pt.z = pos_pts(2, i);
-        bspline.pos_pts.push_back(pt);
+        bspline.pos_pts.push_back(pt); // 放入位置的一组control points
       }
 
       Eigen::VectorXd knots = info->position_traj_.getKnot();
@@ -789,8 +789,14 @@ namespace ego_planner
       bspline.knots.reserve(knots.rows());
       for (int i = 0; i < knots.rows(); ++i)
       {
-        bspline.knots.push_back(knots(i));
+        bspline.knots.push_back(knots(i)); // knot是啥？u_只是个一维向量，好像是用于存放节点间的时间间隔
       }
+
+      /*
+        在这里加上yaw角的规划吗？
+        明天我把速度跟踪放这，先把traj_server那块写好。
+        ego_planner_node这块我慢慢想一想。
+      */
 
       /* 1. publish traj to traj_server */
       bspline_pub_.publish(bspline);
