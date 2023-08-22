@@ -17,14 +17,14 @@ int main(int argc, char **argv)
 
   rebo_replan.init(nh);
 
-  // 加一个perception-aware的线程
-  int myArg = 0;
-  std::thread yaw_thread(computeYaw, myArg);
+  // // 加一个perception-aware的线程
+  // int myArg = 0;
+  // std::thread yaw_thread(computeYaw, myArg);
 
   // ros::Duration(1.0).sleep();
   ros::spin();
 
-  yaw_thread.join(); // 等待子线程完成
+  // yaw_thread.join(); // 等待子线程完成
   return 0;
 }
 

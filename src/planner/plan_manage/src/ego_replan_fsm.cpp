@@ -1,5 +1,5 @@
-
 #include <plan_manage/ego_replan_fsm.h>
+#include <plan_manage/yaw_thread.h> // yaw角计算的函数
 
 namespace ego_planner
 {
@@ -797,6 +797,8 @@ namespace ego_planner
         明天我把速度跟踪放这，先把traj_server那块写好。
         ego_planner_node这块我慢慢想一想。
       */
+      // yaw角计算
+      computeYawVel(bspline);
 
       /* 1. publish traj to traj_server */
       bspline_pub_.publish(bspline);
