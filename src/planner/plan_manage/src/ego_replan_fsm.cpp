@@ -894,6 +894,7 @@ namespace ego_planner
       bspline.knots.push_back(knots(i));
     }
 
+    computeYawVel(bspline); // 多加上一个yaw角计算
     bspline_pub_.publish(bspline);
 
     return true;

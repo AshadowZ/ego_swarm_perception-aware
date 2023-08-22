@@ -5,6 +5,7 @@
 #include "std_msgs/Empty.h"
 #include "visualization_msgs/Marker.h"
 #include <ros/ros.h>
+#include <cmath>
 
 ros::Publisher pos_cmd_pub;
 
@@ -19,6 +20,8 @@ vector<UniformBspline> traj_;
 double traj_duration_;
 ros::Time start_time_;
 int traj_id_;
+vector<Eigen::MatrixXd> yaw_traj_; // 离散的yaw角轨迹
+double yaw_dt_; // yaw角之间的时间间隔
 
 // yaw control
 double last_yaw_, last_yaw_dot_;
@@ -48,13 +51,12 @@ void bsplineCallback(traj_utils::BsplineConstPtr msg)
   // 后面求微分啥的其实只是使用u_，没有用interval这个变量。尝试把setKnot这句话注释后仿真直接异常了，上面interval_赋0.1的一步没有任何意义。
   // 所以时间分配这个工作前面已经做好了，后面的轨迹跟踪不能随意地改动前面的时间分配。
   
-  // ？这里本来有接收yaw traj的代码？
   // parse yaw traj
 
-  // Eigen::MatrixXd yaw_pts(msg->yaw_pts.size(), 1);
-  // for (int i = 0; i < msg->yaw_pts.size(); ++i) {
-  //   yaw_pts(i, 0) = msg->yaw_pts[i];
-  // }
+  Eigen::MatrixXd yaw_pts(msg->yaw_pts.size(), 1);
+  for (std::vector<double>::size_type i = 0; i < msg->yaw_pts.size(); ++i) {
+    yaw_pts(i, 0) = msg->yaw_pts[i];
+  }
 
   // UniformBspline yaw_traj(yaw_pts, msg->order, msg->yaw_dt);
 
@@ -67,6 +69,10 @@ void bsplineCallback(traj_utils::BsplineConstPtr msg)
   traj_.push_back(traj_[1].getDerivative());
 
   traj_duration_ = traj_[0].getTimeSum();
+
+  yaw_traj_.clear();
+  yaw_traj_.push_back(yaw_pts); // 将离散的yaw角轨迹序列塞进去
+  yaw_dt_ = msg->yaw_dt;
 
   receive_traj_ = true;
 }
@@ -163,6 +169,26 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros:
   return yaw_yawdot;
 }
 
+/*
+  一个非常naive的yaw角计算，直接找离当前时刻采样点最近的一个yaw角
+  yaw角的速度也是参考fast-tracker直接给一个0.01，就挺随意的
+  但是这样直接work了，草
+  to-do：测试一下yaw角的采样频率多少合适，写个插值算法，yaw角速率也参考上面那个函数算一下
+*/
+std::pair<double, double> my_calculate_yaw(double t_cur)
+{
+  std::pair<double, double> yaw_yawdot(0, 0);
+  double yaw = 0;
+  double yawdot = 0;
+  size_t yaw_index = floor(t_cur / yaw_dt_); // 找出最近的yaw角离散点
+  yaw = yaw_traj_[0](yaw_index, 0); // 直接让yaw角变成那个离散点
+  yawdot = 0.01; // 速度直接赋个0.01啥的，fast-tracker那篇就是这么干的
+  yaw_yawdot.first = yaw;
+  yaw_yawdot.second = yawdot;
+
+  return yaw_yawdot;
+}
+
 void cmdCallback(const ros::TimerEvent &e)
 {
   /* no publishing before receive traj_ */
@@ -186,7 +212,8 @@ void cmdCallback(const ros::TimerEvent &e)
     // 比如traj_server这个节点是用来接收B样条轨迹的，我们自己起一个节点，它接收B样条轨迹，在此基础上加上yaw角的规划。
     // 然后它把B样条轨迹配套上yaw角的规划一并发过来。
     /*** calculate yaw ***/
-    yaw_yawdot = calculate_yaw(t_cur, pos, time_now, time_last);
+    // yaw_yawdot = calculate_yaw(t_cur, pos, time_now, time_last);
+    yaw_yawdot = my_calculate_yaw(t_cur);
     /*** calculate yaw ***/
 
     double tf = min(traj_duration_, t_cur + 2.0);
