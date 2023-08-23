@@ -112,6 +112,8 @@ namespace ego_planner
     bool checkCollision();
     void publishSwarmTrajs(bool startup_pub);
 
+    void computeYawVel(traj_utils::Bspline& bspline); // 我定义的函数
+     
   public:
     EGOReplanFSM(/* args */)
     {

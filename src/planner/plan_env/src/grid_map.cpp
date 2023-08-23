@@ -158,6 +158,23 @@ void GridMap::initMap(ros::NodeHandle &nh)
   // rand_noise2_ = normal_distribution<double>(0, 0.2);
   // random_device rd;
   // eng_ = default_random_engine(rd());
+
+  // 初始化我定义的变量
+  // camera FoV params
+  far_ = 4.5;
+  // normals of hyperplanes
+  const double top_ang = 0.56125;
+  n_top_ << 0.0, sin(M_PI_2 - top_ang), cos(M_PI_2 - top_ang);
+  n_bottom_ << 0.0, -sin(M_PI_2 - top_ang), cos(M_PI_2 - top_ang);
+  const double left_ang = 0.69222;
+  const double right_ang = 0.68901;
+  n_left_ << sin(M_PI_2 - left_ang), 0.0, cos(M_PI_2 - left_ang);
+  n_right_ << -sin(M_PI_2 - right_ang), 0.0, cos(M_PI_2 - right_ang);
+  // vertices of FoV assuming zero pitch
+  lefttop_ << -far_ * tan(left_ang), -far_ * sin(top_ang), far_; // 坐标系定的好奇怪阿
+  leftbottom_ << -far_ * sin(left_ang), far_ * sin(top_ang), far_;
+  righttop_ << far_ * sin(right_ang), -far_ * sin(top_ang), far_;
+  rightbottom_ << far_ * sin(right_ang), far_ * sin(top_ang), far_;
 }
 
 void GridMap::resetBuffer()
@@ -1021,4 +1038,154 @@ void GridMap::depthOdomCallback(const sensor_msgs::ImageConstPtr &img,
 
   md_.occ_need_update_ = true;
   md_.flag_use_depth_fusion = true;
+}
+
+/*-------------------------------------------------我定义的函数-------------------------------------------------------------*/
+// 返回body to camera的变换矩阵
+Eigen::Matrix4d GridMap::getCamToBody()
+{
+  return md_.cam2body_;
+}
+
+// 接收相机位置和yaw角，返回在该viewpoint的信息增益
+// 好了，让我们接着慢慢修这个傻逼函数的bug
+double GridMap::calcInfoGain(const Eigen::Vector3d& pt, const double& yaw) 
+{
+
+  // compute camera transform
+  auto start_time = ros::Time::now();
+  Eigen::Matrix3d R_wb;
+  R_wb << cos(yaw), -sin(yaw), 0.0, sin(yaw), cos(yaw), 0.0, 0.0, 0.0, 1.0; // yaw角对应的旋转矩阵R_wb
+
+  Eigen::Matrix4d T_wb = Eigen::Matrix4d::Identity(); // T_wb变换矩阵表示当前的机体位姿，body to world
+  T_wb.block(0, 0, 3, 3) = R_wb;
+  T_wb.block(0, 3, 3, 1) = pt;  
+  Eigen::Matrix4d T_bc_ = md_.cam2body_;
+  Eigen::Matrix4d T_wc = T_wb * T_bc_; // T_wc表示当前的相机位姿，camera to world
+  Eigen::Matrix3d R_wc = T_wc.block(0, 0, 3, 3); // 当前相机姿态
+  Eigen::Vector3d t_wc = T_wc.block(0, 3, 3, 1); // 当前相机位置
+
+  // rotate camera seperating plane normals
+  vector<Eigen::Vector3d> normals = { n_top_, n_bottom_, n_left_, n_right_ }; // 用于表示相机FOV的四条法线，是单位变量
+  for (auto& n : normals) // 把这四条法线转换到相机坐标系下
+  n = R_wc * n; 
+  Eigen::Vector3i lbi, ubi; // 用于存放AABB的边界框index
+  calcFovAABB(R_wc, t_wc, lbi, ubi); // 计算相机视野（FOV）在空间中的边界框（Axis-Aligned Bounding Box，AABB）
+
+  Eigen::Vector3i pt_idx, ray_id;
+  Eigen::Vector3d check_pt, ray_pt;
+  const int factor = 4; // 子采样的间隔
+  RayCaster raycaster; // raycaster类用于检查视线上是否有障碍物
+  double gain = 0; // 信息增益：FOV中能看到的未知格子的个数
+  
+  // debug变量
+  int pt_num_AABB = 0, unknown_pt_num = 0, ray_count = 0;
+
+  for (int x = lbi[0]; x <= ubi[0]; ++x) {
+    for (int y = lbi[1]; y <= ubi[1]; ++y) {
+      for (int z = lbi[2]; z <= ubi[2]; ++z) { // 遍历AABB中的所有点
+
+        if (!(x % factor == 0 && y % factor == 0 && z % factor == 0)) continue; // 子采样，隔4个一看
+        pt_idx << x, y, z;
+         
+        if (isInMap(pt_idx)) // AABB中的点有一半都在地图之外？
+        pt_num_AABB++; // 遍历的点个数，看上去点的个数是对的
+
+        if (!isUnknown(pt_idx)) continue; // 检查该点是否已知，已知则直接跳过
+        // 所有的点都未知?
+        indexToPos(pt_idx, check_pt);
+        if (!insideFoV(check_pt, pt, normals)) continue; // 检查该点是否在FOV内，不在则直接跳过，这一步滤了2/3的点，符合直觉
+
+        unknown_pt_num++; // 遍历的点中未知点个数
+        // 过到这里的点是FOV内的子采样的、未知的点
+
+        bool visible = 1;
+        raycaster.setInput(check_pt / mp_.resolution_, pt / mp_.resolution_);
+        while (raycaster.step(ray_pt)){
+          posToIndex(ray_pt, ray_id);
+          if(getOccupancy(ray_id) == 1){ // 排除一下为-1的情况。emmmm，看上去所有ray_id都在地图之外？
+            visible = false;
+            break;
+          }
+          ray_count++; // 一共加了1w多次，还听正常的
+        }
+        if (visible) gain += 1; // 如果我这个FOV里的点未知且可以被看到，它就会提高地图的信息增益
+
+      }
+    }
+  }
+  auto end_time = ros::Time::now();
+  ros::Duration duration = end_time - start_time;
+  // ROS_INFO("executing time: %.4f sec", duration.toSec()); 执行时间就1ms，短到离谱
+
+  std::cout << "pt_num_AABB: " << pt_num_AABB << std::endl;
+  std::cout << "unknown_pt_num: " << unknown_pt_num << std::endl;
+  std::cout << "ray_count: " << ray_count << std::endl;
+  return gain;
+}
+
+// 一个关于Occ函数的测试代码
+// // 每次调用这个函数时返回位置周围长方体中occ的grid个数
+// double GridMap::calcInfoGain(const Eigen::Vector3d& pt, const double& yaw)
+// {
+//   double gain = 0;
+//   Eigen::Vector3i pt_idx, temp;
+//   Eigen::Vector3d temp_d;
+//   posToIndex(pt, pt_idx);
+//   for (int x = 0; x < 50; ++x) {
+//     for (int y = 0; y < 50; ++y) { // 遍历当前平面的2500个点
+
+//         temp << pt_idx(0) + x - 25, pt_idx(1) + y - 25, 10;
+//         // indexToPos(temp, temp_d);
+//         //if(getInflateOccupancy(temp_d)) 
+//         if(isKnownOccupied(temp))
+//         gain++; // ？
+      
+//     }
+//   }
+//   return gain;
+// }
+
+
+void GridMap::calcFovAABB(const Eigen::Matrix3d& R_wc, const Eigen::Vector3d& t_wc,
+                                 Eigen::Vector3i& lb, Eigen::Vector3i& ub) 
+{
+  // axis-aligned bounding box(AABB) of camera FoV
+  vector<Eigen::Vector3d> vertice(5);
+  vertice[0] = R_wc * lefttop_ + t_wc; // 将相机FOV的四个顶点转换相机坐标系下
+  vertice[1] = R_wc * leftbottom_ + t_wc;
+  vertice[2] = R_wc * righttop_ + t_wc;
+  vertice[3] = R_wc * rightbottom_ + t_wc;
+  vertice[4] = t_wc; // 这个点是不能删的
+
+  Eigen::Vector3d lbd, ubd;
+  axisAlignedBoundingBox(vertice, lbd, ubd); // lbd代表边界框的最小点，ubd代表边界框的最大点
+  posToIndex(lbd, lb); // 将pos转换为index
+  posToIndex(ubd, ub);
+  // boundIndex(lb); // bound一下index，写法有点不合理，这样写可能会导致bug产生
+  // boundIndex(ub); // 这两行代码会让遍历的点少一半？
+}
+
+void GridMap::axisAlignedBoundingBox(const vector<Eigen::Vector3d>& points, Eigen::Vector3d& lb,
+                                            Eigen::Vector3d& ub) {
+  lb = points.front(); // 初始化为点集中的第一个点
+  ub = points.front();
+  for (auto p : points) {
+    lb = lb.array().min(p.array());
+    ub = ub.array().max(p.array());
+  }
+}
+
+bool GridMap::insideFoV(const Eigen::Vector3d& pw, const Eigen::Vector3d& pc,
+                              const vector<Eigen::Vector3d>& normals){
+  Eigen::Vector3d dir = pw - pc;
+  if (dir.norm() > far_) { // 在能见范围之外
+    return false;
+  }
+  for (auto n : normals) { // normal好像是相机FOV的四条法向量
+    if (dir.dot(n) < 0.1) {
+      return false;
+    }
+  }
+  return true;
 }

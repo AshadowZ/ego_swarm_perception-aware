@@ -183,6 +183,15 @@ public:
   Eigen::Vector3d getOrigin();
   int getVoxelNum();
   bool getOdomDepthTimeout() { return md_.flag_depth_odom_timeout_; }
+  
+  Eigen::Matrix4d getCamToBody(); // 为了访问私有变量T_bc_只能临时写个函数了
+  double calcInfoGain(const Eigen::Vector3d& pt, const double& yaw); // 移植周指导FUEL的calcInfoGain
+  void calcFovAABB(const Eigen::Matrix3d& R_wc, const Eigen::Vector3d& t_wc, // 算AABB的函数
+                                 Eigen::Vector3i& lb, Eigen::Vector3i& ub);  
+  void axisAlignedBoundingBox(const vector<Eigen::Vector3d>& points, Eigen::Vector3d& lb, // 从几个点中得到AABB
+                                            Eigen::Vector3d& ub);
+  bool insideFoV(const Eigen::Vector3d& pw, const Eigen::Vector3d& pc, // 当前点是否在相机FOV中
+                               const vector<Eigen::Vector3d>& normals);
 
   typedef std::shared_ptr<GridMap> Ptr;
 
@@ -239,6 +248,14 @@ private:
   uniform_real_distribution<double> rand_noise_;
   normal_distribution<double> rand_noise2_;
   default_random_engine eng_;
+
+  // 我添加的变量
+  // normals of camera FoV seperating hyperplane
+  Eigen::Vector3d n_top_, n_bottom_, n_left_, n_right_;
+  // vertices of FoV
+  Eigen::Vector3d lefttop_, righttop_, leftbottom_, rightbottom_;
+  // camera parameters
+  double far_;
 };
 
 /* ============================== definition of inline function
@@ -314,7 +331,7 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ) {
   md_.occupancy_buffer_[toAddress(id)] = occ;
 }
 
-inline int GridMap::getOccupancy(Eigen::Vector3d pos) {
+inline int GridMap::getOccupancy(Eigen::Vector3d pos) { // 它tm的真的work吗？
   if (!isInMap(pos)) return -1;
 
   Eigen::Vector3i id;
