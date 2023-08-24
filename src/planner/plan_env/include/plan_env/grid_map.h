@@ -192,6 +192,7 @@ public:
                                             Eigen::Vector3d& ub);
   bool insideFoV(const Eigen::Vector3d& pw, const Eigen::Vector3d& pc, // 当前点是否在相机FOV中
                                const vector<Eigen::Vector3d>& normals);
+  void boundBox(Eigen::Vector3d& low, Eigen::Vector3d& up);
 
   typedef std::shared_ptr<GridMap> Ptr;
 
@@ -331,7 +332,7 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ) {
   md_.occupancy_buffer_[toAddress(id)] = occ;
 }
 
-inline int GridMap::getOccupancy(Eigen::Vector3d pos) { // 它tm的真的work吗？
+inline int GridMap::getOccupancy(Eigen::Vector3d pos) {
   if (!isInMap(pos)) return -1;
 
   Eigen::Vector3i id;

@@ -4,9 +4,10 @@ SET(CMAKE_BUILD_TYPE Release) # Release, RelWithDebInfo
 #SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 ADD_COMPILE_OPTIONS(-std=c++11 )
 ADD_COMPILE_OPTIONS(-std=c++14 )
+set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda-11.4) # 指定cuda路径，cmake自己找不到（fuck）
 
 #set(ENABLE_CUDA false)
-set(ENABLE_CUDA false)
+set(ENABLE_CUDA true)
 
 if(ENABLE_CUDA)
   find_package(CUDA REQUIRED)
