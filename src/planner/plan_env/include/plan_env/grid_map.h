@@ -41,6 +41,42 @@ struct matrix_hash : std::unary_function<T, size_t> {
   }
 };
 
+class CastFlags {
+private:
+  /* data */
+  vector<char> flags_;
+  Eigen::Vector3i lb_, ub_, cells_;
+
+public:
+  CastFlags() {
+  }
+  CastFlags(const int& size) {
+    flags_.resize(size);
+  }
+  ~CastFlags() {
+  }
+
+  void reset(const Eigen::Vector3i& lb, const Eigen::Vector3i& ub) {
+    lb_ = lb;
+    ub_ = ub;
+    cells_ = ub_ - lb_;
+    fill(flags_.begin(), flags_.end(), 0);
+  }
+
+  inline int address(const Eigen::Vector3i& idx) {
+    Eigen::Vector3i diff = idx - lb_;
+    return diff[2] + diff[1] * cells_[2] + diff[0] * cells_[1] * cells_[2];
+  }
+
+  inline char getFlag(const Eigen::Vector3i& idx) {
+    return flags_[address(idx)];
+  }
+
+  inline void setFlag(const Eigen::Vector3i& idx, const char& f) {
+    flags_[address(idx)] = f;
+  }
+};
+
 // constant parameters
 
 struct MappingParameters {
@@ -185,6 +221,7 @@ public:
   bool getOdomDepthTimeout() { return md_.flag_depth_odom_timeout_; }
   
   Eigen::Matrix4d getCamToBody(); // 为了访问私有变量T_bc_只能临时写个函数了
+  double calcInformationGain(const Eigen::Vector3d& pt, const double& yaw); // 没有与路径有关的权重计算
   double calcInfoGain(const Eigen::Vector3d& pt, const double& yaw); // 移植周指导FUEL的calcInfoGain
   void calcFovAABB(const Eigen::Matrix3d& R_wc, const Eigen::Vector3d& t_wc, // 算AABB的函数
                                  Eigen::Vector3i& lb, Eigen::Vector3i& ub);  
@@ -193,6 +230,7 @@ public:
   bool insideFoV(const Eigen::Vector3d& pw, const Eigen::Vector3d& pc, // 当前点是否在相机FOV中
                                const vector<Eigen::Vector3d>& normals);
   void boundBox(Eigen::Vector3d& low, Eigen::Vector3d& up);
+  void initCastFlag(const Eigen::Vector3d& pos);
 
   typedef std::shared_ptr<GridMap> Ptr;
 
@@ -257,6 +295,8 @@ private:
   Eigen::Vector3d lefttop_, righttop_, leftbottom_, rightbottom_;
   // camera parameters
   double far_;
+  // flags for accelerated raycasting, 0: unvisited, 1: visible, 2: invisible
+  CastFlags cast_flags_;
 };
 
 /* ============================== definition of inline function

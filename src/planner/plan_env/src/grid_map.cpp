@@ -183,6 +183,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
   righttop_ << far_ * tan(left_right_ang), -far_ * tan(up_down_ang), far_;
   rightbottom_ << far_ * tan(left_right_ang), far_ * tan(up_down_ang), far_;
   
+  cast_flags_ = CastFlags(1000000);
 }
 
 void GridMap::resetBuffer()
@@ -1056,6 +1057,77 @@ Eigen::Matrix4d GridMap::getCamToBody()
   return md_.cam2body_;
 }
 
+double GridMap::calcInformationGain(const Eigen::Vector3d& pt, const double& yaw)
+{
+  auto start_time = ros::Time::now();
+
+  Eigen::Matrix3d R_wb;
+  R_wb << cos(yaw), -sin(yaw), 0.0, sin(yaw), cos(yaw), 0.0, 0.0, 0.0, 1.0; // yaw角对应的旋转矩阵R_wb
+
+  Eigen::Matrix4d T_wb = Eigen::Matrix4d::Identity(); // T_wb变换矩阵表示当前的机体位姿，body to world
+  T_wb.block(0, 0, 3, 3) = R_wb;
+  T_wb.block(0, 3, 3, 1) = pt;  
+  Eigen::Matrix4d T_bc_ = md_.cam2body_;
+  Eigen::Matrix4d T_wc = T_wb * T_bc_; // T_wc表示当前的相机位姿，camera to world
+  Eigen::Matrix3d R_wc = T_wc.block(0, 0, 3, 3); // 当前相机姿态
+  Eigen::Vector3d t_wc = T_wc.block(0, 3, 3, 1); // 当前相机位置
+
+  // rotate camera seperating plane normals
+  vector<Eigen::Vector3d> normals = { n_top_, n_bottom_, n_left_, n_right_ }; // 用于表示相机FOV的四条法线，是单位变量
+  for (auto& n : normals) // 把这四条法线转换到相机坐标系下
+  {
+    n = R_wc * n; 
+  }  
+  Eigen::Vector3i lbi, ubi; // 用于存放AABB的边界框index
+  calcFovAABB(R_wc, t_wc, lbi, ubi); // 计算相机视野（FOV）在空间中的边界框（Axis-Aligned Bounding Box，AABB）
+
+  Eigen::Vector3i pt_idx, ray_id;
+  Eigen::Vector3d check_pt, ray_pt;
+  const int factor = 4; // 子采样的间隔
+  double gain = 0; // 信息增益：FOV中能看到的未知格子的个数
+  Eigen::Vector3d offset = Eigen::Vector3d(0.5, 0.5, 0.5) - mp_.map_origin_ / mp_.resolution_; // offset只是用来把pos转换为index（raycast中）
+  RayCaster raycaster; // raycaster类用于检查视线上是否有障碍物
+
+  for (int x = lbi[0]; x <= ubi[0]; ++x) 
+    for (int y = lbi[1]; y <= ubi[1]; ++y) 
+      for (int z = lbi[2]; z <= ubi[2]; ++z) { // 遍历AABB中的所有点
+        // subsampling
+        if (!(x % factor == 0 && y % factor == 0 && z % factor == 0)) continue; // 子采样，每次跳4个
+        // check visibility of unknown cells in FOV, 1: accessible, 2: blocked
+        pt_idx << x, y, z;
+        if (!isUnknown(pt_idx)) continue; // 检查该点是否已知，已知则直接跳过
+        indexToPos(pt_idx, check_pt);
+        if (!insideFoV(check_pt, pt, normals)) continue; // 检查该点是否在FOV内，不在则直接跳过
+
+        char flag = cast_flags_.getFlag(pt_idx); // 是不是已经raycast过了，加速算法
+        if (flag == 1) {  // visited visible cell, fetch visibility directly
+          gain += 1;
+        } else if (flag == 0) {  // unvisited cell, should raycast
+          char result = 1;
+          raycaster.setInput(check_pt / mp_.resolution_, pt / mp_.resolution_);
+          while (raycaster.step(ray_pt)){
+            ray_id(0) = ray_pt(0) + offset(0); // 这个ray_pt不能用posToIndex转啊，切记
+            ray_id(1) = ray_pt(1) + offset(1);
+            ray_id(2) = ray_pt(2) + offset(2);
+            if(getOccupancy(ray_id) == 1){
+              result = 2;
+              break;
+            }
+          }
+          if(result == 1) {
+            gain += 1;
+          }
+          cast_flags_.setFlag(pt_idx, result);
+        }   
+      }
+
+  auto end_time = ros::Time::now();
+  ros::Duration duration = end_time - start_time;
+  ROS_INFO("executing time: %.4f sec", duration.toSec());
+
+  return gain;
+}
+
 // 接收相机位置和yaw角，返回在该viewpoint的信息增益
 // 好了，让我们接着慢慢修这个傻逼函数的bug
 // emmmmm，看上去大致是work了
@@ -1129,10 +1201,10 @@ double GridMap::calcInfoGain(const Eigen::Vector3d& pt, const double& yaw)
   }
   auto end_time = ros::Time::now();
   ros::Duration duration = end_time - start_time;
-  ROS_INFO("executing time: %.4f sec", duration.toSec()); // 执行时间就1ms，短到离谱
+  // ROS_INFO("executing time: %.4f sec", duration.toSec()); // 执行时间2-4ms，raycast的点多时最高可到9ms，可尝试加速
 
-  std::cout << "pt_num_AABB: " << pt_num_AABB << std::endl;
-  std::cout << "unknown_pt_num: " << unknown_pt_num << std::endl;
+  // std::cout << "pt_num_AABB: " << pt_num_AABB << std::endl;
+  // std::cout << "unknown_pt_num: " << unknown_pt_num << std::endl;
   return gain;
 }
 
@@ -1231,4 +1303,12 @@ void GridMap::boundBox(Eigen::Vector3d& low, Eigen::Vector3d& up){
       low[i] = max(low[i], mp_.map_min_boundary_[i]);
       up[i] = min(up[i], mp_.map_max_boundary_[i]);
     }
+}
+
+void GridMap::initCastFlag(const Eigen::Vector3d& pos) {
+  Eigen::Vector3d vec(far_, far_, rightbottom_[1]);
+  Eigen::Vector3i lbi, ubi;
+  posToIndex(pos - vec, lbi);
+  posToIndex(pos + vec, ubi);
+  cast_flags_.reset(lbi, ubi);
 }

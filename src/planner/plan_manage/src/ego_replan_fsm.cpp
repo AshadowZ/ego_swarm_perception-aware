@@ -996,7 +996,8 @@ namespace ego_planner
           pos = pos_traj.evaluateDeBoorT(t_cur);
           yaw = atan2(vel[1], vel[0]); // yaw就是当前速度的切线方向
           bspline.yaw_pts.push_back(yaw);
-          gain = planner_manager_->grid_map_->calcInfoGain(pos, yaw);
+          planner_manager_->grid_map_->initCastFlag(pos);
+          gain = planner_manager_->grid_map_->calcInformationGain(pos, yaw);
           cout << "gain of yaw is:" << gain << endl;
       }
       
