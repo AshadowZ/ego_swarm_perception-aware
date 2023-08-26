@@ -1006,8 +1006,8 @@ namespace ego_planner
             temp_yaw = yaw + (j-2) * 0.524;
             gain = planner_manager_->grid_map_->calcInformationGain(pos, temp_yaw);
             cout << "the yaw is: " << temp_yaw << ". gain of this viewpoint is: " << gain  << endl;
-            if(gain > best_gain) {
-              best_gain = gain;
+            if(gain > best_gain) { // 这个写法的问题是可能前100ms的yaw角为-60度，到了后100ms就变60度了，不符合动力学
+              best_gain = gain; // 要在前端离散的yaw角生成就考虑到yaw角的连续性，同时后面的traj_server也要考虑动力学约束
               best_yaw = temp_yaw;
             } 
           }

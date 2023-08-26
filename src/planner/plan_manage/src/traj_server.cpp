@@ -180,9 +180,14 @@ std::pair<double, double> my_calculate_yaw(double t_cur)
   std::pair<double, double> yaw_yawdot(0, 0);
   double yaw = 0;
   double yawdot = 0;
-  size_t yaw_index = floor(t_cur / yaw_dt_); // 找出最近的yaw角离散点
-  yaw_index = min(yaw_index, size_t(yaw_traj_[0].rows())-1); // 防止越界，修了这里好像就没bug了
-  yaw = yaw_traj_[0](yaw_index, 0); // 直接让yaw角变成那个离散点
+  int yaw_index = floor(t_cur / yaw_dt_); // 找出最近的yaw角离散点
+  yaw_index = min(yaw_index, int(yaw_traj_[0].rows())-1); // 防止越界，修了这里好像就没bug了
+  if(yaw_index < int(yaw_traj_[0].rows())-1) { // 简单的线性插值
+    yaw = yaw_traj_[0](yaw_index, 0) + (t_cur - yaw_dt_ * yaw_index) / yaw_dt_ * (yaw_traj_[0](yaw_index+1, 0) - yaw_traj_[0](yaw_index, 0)); // 直接让yaw角变成那个离散点
+  } else {
+    yaw = yaw_traj_[0](yaw_index, 0);
+  }
+  
   yawdot = 0.01; // 速度直接赋个0.01啥的，fast-tracker那篇就是这么干的
   yaw_yawdot.first = yaw;
   yaw_yawdot.second = yawdot;
