@@ -965,6 +965,7 @@ namespace ego_planner
       double traj_duration_; // 轨迹总时间
       size_t yaw_num; // 离散yaw角的个数
       double yaw = 0;
+      double best_yaw = 0, temp_yaw = 0;
 
       // 还是得转换为UniformBspline来计算
       Eigen::MatrixXd pos_pts(3, bspline.pos_pts.size());
@@ -988,17 +989,31 @@ namespace ego_planner
       // 计算yaw角，每100ms计算一个值
       bspline.yaw_dt = 0.1;
       yaw_num = floor(traj_duration_  / bspline.yaw_dt);
-      int gain; // 信息增益
+      int gain = 0; // 信息增益
+      int best_gain = 0;
       Eigen::Vector3d vel(Eigen::Vector3d::Zero()), pos(Eigen::Vector3d::Zero());
-      for(size_t i = 0; i < yaw_num; ++i){
+      for(size_t i = 0; i < yaw_num; ++i) {
           t_cur = i * bspline.yaw_dt;
           vel = vel_traj.evaluateDeBoorT(t_cur);
           pos = pos_traj.evaluateDeBoorT(t_cur);
           yaw = atan2(vel[1], vel[0]); // yaw就是当前速度的切线方向
-          bspline.yaw_pts.push_back(yaw);
+
+          best_gain = 0;
+          best_yaw = yaw;
           planner_manager_->grid_map_->initCastFlag(pos);
-          gain = planner_manager_->grid_map_->calcInformationGain(pos, yaw);
-          cout << "gain of yaw is:" << gain << endl;
+          cout << "-------------------------" << endl;
+          for(int j = 0; j < 5; ++j) { // 以速度切线对应的yaw角为中心，采样-60～60度的5个yaw角
+            temp_yaw = yaw + (j-2) * 0.524;
+            gain = planner_manager_->grid_map_->calcInformationGain(pos, temp_yaw);
+            cout << "the yaw is: " << temp_yaw << ". gain of this viewpoint is: " << gain  << endl;
+            if(gain > best_gain) {
+              best_gain = gain;
+              best_yaw = temp_yaw;
+            } 
+          }
+          bspline.yaw_pts.push_back(best_yaw);
+          cout << "best yaw is: " << best_yaw << endl;
+          cout << "gain of best yaw is: " << best_gain << endl;
       }
       
       cout << "yaw sequence is computed!" << endl;

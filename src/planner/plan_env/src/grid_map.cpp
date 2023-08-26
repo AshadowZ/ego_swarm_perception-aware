@@ -1123,7 +1123,7 @@ double GridMap::calcInformationGain(const Eigen::Vector3d& pt, const double& yaw
 
   auto end_time = ros::Time::now();
   ros::Duration duration = end_time - start_time;
-  ROS_INFO("executing time: %.4f sec", duration.toSec());
+  // ROS_INFO("executing time: %.4f sec", duration.toSec());
 
   return gain;
 }
