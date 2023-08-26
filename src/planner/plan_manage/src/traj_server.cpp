@@ -8,6 +8,7 @@
 #include <cmath>
 
 ros::Publisher pos_cmd_pub;
+ros::Publisher cmd_vis_pub; // FOV可视化
 
 quadrotor_msgs::PositionCommand cmd;
 double pos_gain[3] = {0, 0, 0};
@@ -26,6 +27,66 @@ double yaw_dt_; // yaw角之间的时间间隔
 // yaw control
 double last_yaw_, last_yaw_dot_;
 double time_forward_;
+
+// 相机FOV参数
+vector<Eigen::Vector3d> cam_vertices1_, cam_vertices2_;
+
+void getFOV(vector<Eigen::Vector3d>& list1, vector<Eigen::Vector3d>& list2, Eigen::Vector3d pos, double yaw) {
+  list1.clear();
+  list2.clear();
+
+  // Get info for visualizing FOV at (pos, yaw)
+  Eigen::Matrix3d Rwb;
+  Rwb << cos(yaw), -sin(yaw), 0, sin(yaw), cos(yaw), 0, 0, 0, 1;
+  for (int i = 0; i < cam_vertices1_.size(); ++i) {
+    auto p1 = Rwb * cam_vertices1_[i] + pos;
+    auto p2 = Rwb * cam_vertices2_[i] + pos;
+    list1.push_back(p1);
+    list2.push_back(p2);
+  }
+}
+
+void drawFOV(const vector<Eigen::Vector3d>& list1, const vector<Eigen::Vector3d>& list2) {
+  visualization_msgs::Marker mk;
+  mk.header.frame_id = "world";
+  mk.header.stamp = ros::Time::now();
+  mk.id = 0;
+  mk.ns = "current_pose";
+  mk.type = visualization_msgs::Marker::LINE_LIST;
+  mk.pose.orientation.x = 0.0;
+  mk.pose.orientation.y = 0.0;
+  mk.pose.orientation.z = 0.0;
+  mk.pose.orientation.w = 1.0;
+  mk.color.r = 1.0;
+  mk.color.g = 0.0;
+  mk.color.b = 0.0;
+  mk.color.a = 1.0;
+  mk.scale.x = 0.04;
+  mk.scale.y = 0.04;
+  mk.scale.z = 0.04;
+
+  // Clean old marker
+  mk.action = visualization_msgs::Marker::DELETE;
+  cmd_vis_pub.publish(mk);
+
+  if (list1.size() == 0) return;
+
+  // Pub new marker
+  geometry_msgs::Point pt;
+  for (int i = 0; i < int(list1.size()); ++i) {
+    pt.x = list1[i](0);
+    pt.y = list1[i](1);
+    pt.z = list1[i](2);
+    mk.points.push_back(pt);
+
+    pt.x = list2[i](0);
+    pt.y = list2[i](1);
+    pt.z = list2[i](2);
+    mk.points.push_back(pt);
+  }
+  mk.action = visualization_msgs::Marker::ADD;
+  cmd_vis_pub.publish(mk);
+}
 
 void bsplineCallback(traj_utils::BsplineConstPtr msg)
 {
@@ -268,6 +329,11 @@ void cmdCallback(const ros::TimerEvent &e)
   last_yaw_ = cmd.yaw;
 
   pos_cmd_pub.publish(cmd);
+
+  // FOV可视化
+  vector<Eigen::Vector3d> l1, l2;
+  getFOV(l1, l2, pos, yaw_yawdot.first);
+  drawFOV(l1, l2);
 }
 
 int main(int argc, char **argv)
@@ -279,6 +345,7 @@ int main(int argc, char **argv)
   ros::Subscriber bspline_sub = nh.subscribe("planning/bspline", 10, bsplineCallback);
 
   pos_cmd_pub = nh.advertise<quadrotor_msgs::PositionCommand>("/position_cmd", 50);
+  cmd_vis_pub = nh.advertise<visualization_msgs::Marker>("planning/position_cmd_vis", 10);
 
   ros::Timer cmd_timer = nh.createTimer(ros::Duration(0.01), cmdCallback);
 
@@ -294,6 +361,32 @@ int main(int argc, char **argv)
   nh.param("traj_server/time_forward", time_forward_, -1.0);
   last_yaw_ = 0.0;
   last_yaw_dot_ = 0.0;
+
+  // 相机FOV参数初始化
+  double vis_dist = 4.5;
+  double hor = vis_dist * tan(0.689);  // 40度
+  double vert = vis_dist * tan(0.524); // 30度
+  Eigen::Vector3d origin(0, 0, 0);
+  Eigen::Vector3d left_up(vis_dist, hor, vert);
+  Eigen::Vector3d left_down(vis_dist, hor, -vert);
+  Eigen::Vector3d right_up(vis_dist, -hor, vert);
+  Eigen::Vector3d right_down(vis_dist, -hor, -vert);
+  cam_vertices1_.push_back(origin);
+  cam_vertices2_.push_back(left_up);
+  cam_vertices1_.push_back(origin);
+  cam_vertices2_.push_back(left_down);
+  cam_vertices1_.push_back(origin);
+  cam_vertices2_.push_back(right_up);
+  cam_vertices1_.push_back(origin);
+  cam_vertices2_.push_back(right_down);
+  cam_vertices1_.push_back(left_up);
+  cam_vertices2_.push_back(right_up);
+  cam_vertices1_.push_back(right_up);
+  cam_vertices2_.push_back(right_down);
+  cam_vertices1_.push_back(right_down);
+  cam_vertices2_.push_back(left_down);
+  cam_vertices1_.push_back(left_down);
+  cam_vertices2_.push_back(left_up);
 
   ros::Duration(1.0).sleep();
 
