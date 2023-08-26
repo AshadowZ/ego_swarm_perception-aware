@@ -966,6 +966,8 @@ namespace ego_planner
       size_t yaw_num; // 离散yaw角的个数
       double yaw = 0;
       double best_yaw = 0, temp_yaw = 0;
+      bool is_select_meaningful = 0; // 如果所在viewpoint看到的地图全是未知，则yaw角选择无意义
+      int meaningful_threshold = 150; // 地图增益三百多，基本FOV内grid全是未知
 
       // 还是得转换为UniformBspline来计算
       Eigen::MatrixXd pos_pts(3, bspline.pos_pts.size());
@@ -998,18 +1000,30 @@ namespace ego_planner
           pos = pos_traj.evaluateDeBoorT(t_cur);
           yaw = atan2(vel[1], vel[0]); // yaw就是当前速度的切线方向
 
+          /*
+            to-do：
+            使用一些工程上的方法平滑yaw角轨迹，反复横跳是很灾难性的，后面的traj_server也要考虑动力学可行性
+            看看能不能减慢ego-planner生成的轨迹速度，或者让地图障碍物稀疏一点
+            飞机创进障碍物是yaw角转的不够及时，还是yaw角规划写的有问题，可能要考虑周指导带权重的那一版本信息增益实现
+          */
           best_gain = 0;
           best_yaw = yaw;
           planner_manager_->grid_map_->initCastFlag(pos);
+          is_select_meaningful = 0; 
           cout << "-------------------------" << endl;
           for(int j = 0; j < 5; ++j) { // 以速度切线对应的yaw角为中心，采样-60～60度的5个yaw角
             temp_yaw = yaw + (j-2) * 0.524;
             gain = planner_manager_->grid_map_->calcInformationGain(pos, temp_yaw);
             cout << "the yaw is: " << temp_yaw << ". gain of this viewpoint is: " << gain  << endl;
-            if(gain > best_gain) { // 这个写法的问题是可能前100ms的yaw角为-60度，到了后100ms就变60度了，不符合动力学
-              best_gain = gain; // 要在前端离散的yaw角生成就考虑到yaw角的连续性，同时后面的traj_server也要考虑动力学约束
+            if(gain < meaningful_threshold) is_select_meaningful = 1;
+            if(gain > best_gain) {
+              best_gain = gain;
               best_yaw = temp_yaw;
             } 
+          }
+          if(!is_select_meaningful) { // 如果ray角选择无意义，则直接令其等于轨迹速度方向
+            best_yaw = yaw;
+            best_gain = planner_manager_->grid_map_->calcInformationGain(pos, yaw);
           }
           bspline.yaw_pts.push_back(best_yaw);
           cout << "best yaw is: " << best_yaw << endl;
@@ -1019,10 +1033,10 @@ namespace ego_planner
       cout << "yaw sequence is computed!" << endl;
       cout << "traj_duration: " << traj_duration_ << endl;
       cout << "Number of elements in yaw_pts: " << bspline.yaw_pts.size() << endl;
-      cout << "First three elements in yaw_pts: ";
-      for (size_t i = 0; i < std::min(bspline.yaw_pts.size(), static_cast<size_t>(3)); ++i) {
-          cout << bspline.yaw_pts[i] << " ";
-      }
+      // cout << "First three elements in yaw_pts: ";
+      // for (size_t i = 0; i < std::min(bspline.yaw_pts.size(), static_cast<size_t>(3)); ++i) {
+      //     cout << bspline.yaw_pts[i] << " ";
+      // }
       cout << endl;
   }
 
