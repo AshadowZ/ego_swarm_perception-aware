@@ -961,13 +961,15 @@ namespace ego_planner
   // 时间间隔就100ms，由后面进行插值？
   void EGOReplanFSM::computeYawVel(traj_utils::Bspline& bspline){
       // yaw control
+      constexpr double PI = 3.1415926;
       double t_cur;
       double traj_duration_; // 轨迹总时间
       size_t yaw_num; // 离散yaw角的个数
       double yaw = 0;
-      double best_yaw = 0, temp_yaw = 0;
+      double best_yaw = 0, temp_yaw = 0, last_best_yaw = 0;
       bool is_select_meaningful = 0; // 如果所在viewpoint看到的地图全是未知，则yaw角选择无意义
-      int meaningful_threshold = 150; // 地图增益三百多，基本FOV内grid全是未知
+      double meaningful_threshold = 300; // 地图增益三百多，基本FOV内grid全是未知
+      double smo_degree = 30; // 光滑项的权重
 
       // 还是得转换为UniformBspline来计算
       Eigen::MatrixXd pos_pts(3, bspline.pos_pts.size());
@@ -991,15 +993,17 @@ namespace ego_planner
       // 计算yaw角，每100ms计算一个值
       bspline.yaw_dt = 0.1;
       yaw_num = floor(traj_duration_  / bspline.yaw_dt);
-      int gain = 0; // 信息增益
-      int best_gain = 0;
+      double gain = 0; // 信息增益
+      double best_gain = 0;
+      vector<double> gains;
       Eigen::Vector3d vel(Eigen::Vector3d::Zero()), pos(Eigen::Vector3d::Zero());
+      vel = vel_traj.evaluateDeBoorT(0);
+      last_best_yaw = atan2(vel[1], vel[0]);
       for(size_t i = 0; i < yaw_num; ++i) {
           t_cur = i * bspline.yaw_dt;
           vel = vel_traj.evaluateDeBoorT(t_cur);
           pos = pos_traj.evaluateDeBoorT(t_cur);
           yaw = atan2(vel[1], vel[0]); // yaw就是当前速度的切线方向
-
           /*
             to-do：
             使用一些工程上的方法平滑yaw角轨迹，反复横跳是很灾难性的，后面的traj_server也要考虑动力学可行性
@@ -1011,19 +1015,30 @@ namespace ego_planner
           planner_manager_->grid_map_->initCastFlag(pos);
           is_select_meaningful = 0; 
           cout << "-------------------------" << endl;
-          for(int j = 0; j < 5; ++j) { // 以速度切线对应的yaw角为中心，采样-60～60度的5个yaw角
-            temp_yaw = yaw + (j-2) * 0.524;
+          // Eigen::MatrixXd ctrl_pts = pos_traj.getControlPoint().transpose();
+          gains.clear();
+          for(int j = 0; j < 5; ++j) { // 以速度切线对应的yaw角为中心，采样-45～45度的5个yaw角
+            temp_yaw = yaw + (j-2) * 0.262;
             gain = planner_manager_->grid_map_->calcInformationGain(pos, temp_yaw);
-            cout << "the yaw is: " << temp_yaw << ". gain of this viewpoint is: " << gain  << endl;
+            // 判断是否已经基本看到的都是未知
             if(gain < meaningful_threshold) is_select_meaningful = 1;
-            if(gain > best_gain) {
-              best_gain = gain;
-              best_yaw = temp_yaw;
-            } 
+            gain = gain - smo_degree * abs(temp_yaw - last_best_yaw) ; // 加入光滑项
+            gains.push_back(gain);
+            cout << "the yaw is: " << temp_yaw << ". gain of this viewpoint is: " << gains[j]  << endl;
           }
           if(!is_select_meaningful) { // 如果ray角选择无意义，则直接令其等于轨迹速度方向
             best_yaw = yaw;
-            best_gain = planner_manager_->grid_map_->calcInformationGain(pos, yaw);
+            best_gain = gains[2];
+          } else {
+            auto max_it = max_element(gains.begin(), gains.end());
+            best_gain = *max_it;
+            best_yaw = yaw + (distance(gains.begin(), max_it) - 2) * 0.262;
+          }
+          last_best_yaw = best_yaw;
+          if(best_yaw < -PI) {
+            best_yaw += 2 * PI;
+          } else if(best_yaw > PI) {
+            temp_yaw -= 2 * PI;
           }
           bspline.yaw_pts.push_back(best_yaw);
           cout << "best yaw is: " << best_yaw << endl;

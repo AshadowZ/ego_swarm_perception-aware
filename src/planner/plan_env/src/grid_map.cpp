@@ -1128,6 +1128,89 @@ double GridMap::calcInformationGain(const Eigen::Vector3d& pt, const double& yaw
   return gain;
 }
 
+// 带轨迹权重版本的信息增益实现
+// 看上去也没比不带权重的版本好上多好，反而exp会导致数值计算的问题，本来的gain是有实际意义的
+// emmmmm，好像效果确实会更好一些？
+double GridMap::calcInformationGain(const Eigen::Vector3d& pt, const double& yaw,
+                                                                const Eigen::MatrixXd& ctrl_pts) 
+{
+  auto start_time = ros::Time::now();
+
+  Eigen::Matrix3d R_wb;
+  R_wb << cos(yaw), -sin(yaw), 0.0, sin(yaw), cos(yaw), 0.0, 0.0, 0.0, 1.0; // yaw角对应的旋转矩阵R_wb
+
+  Eigen::Matrix4d T_wb = Eigen::Matrix4d::Identity(); // T_wb变换矩阵表示当前的机体位姿，body to world
+  T_wb.block(0, 0, 3, 3) = R_wb;
+  T_wb.block(0, 3, 3, 1) = pt;  
+  Eigen::Matrix4d T_bc_ = md_.cam2body_;
+  Eigen::Matrix4d T_wc = T_wb * T_bc_; // T_wc表示当前的相机位姿，camera to world
+  Eigen::Matrix3d R_wc = T_wc.block(0, 0, 3, 3); // 当前相机姿态
+  Eigen::Vector3d t_wc = T_wc.block(0, 3, 3, 1); // 当前相机位置
+
+  // rotate camera seperating plane normals
+  vector<Eigen::Vector3d> normals = { n_top_, n_bottom_, n_left_, n_right_ }; // 用于表示相机FOV的四条法线，是单位变量
+  for (auto& n : normals) // 把这四条法线转换到相机坐标系下
+  {
+    n = R_wc * n; 
+  }  
+  Eigen::Vector3i lbi, ubi; // 用于存放AABB的边界框index
+  calcFovAABB(R_wc, t_wc, lbi, ubi); // 计算相机视野（FOV）在空间中的边界框（Axis-Aligned Bounding Box，AABB）
+
+  Eigen::Vector3i pt_idx, ray_id;
+  Eigen::Vector3d check_pt, ray_pt;
+  const int factor = 4; // 子采样的间隔
+  double gain = 0; // 信息增益：FOV中能看到的未知格子的个数
+  Eigen::Vector3d offset = Eigen::Vector3d(0.5, 0.5, 0.5) - mp_.map_origin_ / mp_.resolution_; // offset只是用来把pos转换为index（raycast中）
+  RayCaster raycaster; // raycaster类用于检查视线上是否有障碍物
+  pair<double, double> dist12(0, 0); // 点与轨迹的横向与纵向距离
+  double lambda1_ = 2.0, lambda2_ = 1.0;
+
+  for (int x = lbi[0]; x <= ubi[0]; ++x) 
+    for (int y = lbi[1]; y <= ubi[1]; ++y) 
+      for (int z = lbi[2]; z <= ubi[2]; ++z) { // 遍历AABB中的所有点
+        // subsampling
+        if (!(x % factor == 0 && y % factor == 0 && z % factor == 0)) continue; // 子采样，每次跳4个
+        // check visibility of unknown cells in FOV, 1: accessible, 2: blocked
+        pt_idx << x, y, z;
+        if (!isUnknown(pt_idx)) continue; // 检查该点是否已知，已知则直接跳过
+        indexToPos(pt_idx, check_pt);
+        if (!insideFoV(check_pt, pt, normals)) continue; // 检查该点是否在FOV内，不在则直接跳过
+
+        char flag = cast_flags_.getFlag(pt_idx); // 是不是已经raycast过了，加速算法
+        if (flag == 1) {  // visited visible cell, fetch visibility directly
+          distToPathAndCurPos(check_pt, ctrl_pts, dist12, false);
+          // cout << "gain of this point is : " << 100 * exp(-lambda1_ * dist12.first - lambda2_ * dist12.second) << endl;
+          gain += 1000 * exp(-lambda1_ * dist12.first - lambda2_ * dist12.second);
+        } else if (flag == 0) {  // unvisited cell, should raycast
+          char result = 1;
+          raycaster.setInput(check_pt / mp_.resolution_, pt / mp_.resolution_);
+          while (raycaster.step(ray_pt)){
+            ray_id(0) = ray_pt(0) + offset(0); // 这个ray_pt不能用posToIndex转啊，切记
+            ray_id(1) = ray_pt(1) + offset(1);
+            ray_id(2) = ray_pt(2) + offset(2);
+            if(getOccupancy(ray_id) == 1){
+              result = 2;
+              break;
+            }
+          }
+          if(result == 1) {
+            distToPathAndCurPos(check_pt, ctrl_pts, dist12, false);
+            // cout << "gain of this point is : " << exp(-lambda1_ * dist12.first - lambda2_ * dist12.second) << endl;
+            gain += 1000 * exp(-lambda1_ * dist12.first - lambda2_ * dist12.second);
+          }
+          cast_flags_.setFlag(pt_idx, result);
+        }   
+      }
+
+  // std::cout << "size of ctrl_pts: " << ctrl_pts.rows() << "rows x " << ctrl_pts.cols() << "cols" << std::endl;
+
+  auto end_time = ros::Time::now();
+  ros::Duration duration = end_time - start_time;
+  ROS_INFO("executing time: %.4f sec", duration.toSec());
+
+  return gain;
+}
+
 // 接收相机位置和yaw角，返回在该viewpoint的信息增益
 // 好了，让我们接着慢慢修这个傻逼函数的bug
 // emmmmm，看上去大致是work了
@@ -1312,3 +1395,28 @@ void GridMap::initCastFlag(const Eigen::Vector3d& pos) {
   posToIndex(pos + vec, ubi);
   cast_flags_.reset(lbi, ubi);
 }
+
+// 似乎是返回某个点距离轨迹的横向距离和纵向距离
+void GridMap::distToPathAndCurPos(const Eigen::Vector3d& check_pt, const Eigen::MatrixXd& ctrl_pts,
+                          std::pair<double, double>& dists, bool debug = false)
+{
+  double min_squ = numeric_limits<double>::max();
+  int idx = -1;
+  for (int i = 0; i < ctrl_pts.rows(); ++i) {
+    Eigen::Vector3d ctrl_pt = ctrl_pts.row(i);
+    double squ = (ctrl_pt - check_pt).squaredNorm();
+    if (squ < min_squ) {
+      min_squ = squ;
+      idx = i;
+    }
+  }
+  dists.first = sqrt(min_squ);
+  dists.second = 0.0;
+  for (int i = 0; i < idx; ++i) {
+    dists.second += (ctrl_pts.row(i + 1) - ctrl_pts.row(i)).norm();
+  }
+  if (debug)
+    std::cout << "pos: " << check_pt.transpose() << ", d1: " << dists.first << ", d2: " << dists.second
+              << std::endl;
+}
+    

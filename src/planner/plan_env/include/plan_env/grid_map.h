@@ -222,6 +222,8 @@ public:
   
   Eigen::Matrix4d getCamToBody(); // 为了访问私有变量T_bc_只能临时写个函数了
   double calcInformationGain(const Eigen::Vector3d& pt, const double& yaw); // 没有与路径有关的权重计算
+  double calcInformationGain(const Eigen::Vector3d& pt, const double& yaw,
+                                           const Eigen::MatrixXd& ctrl_pts); // 重载一个带权重的版本
   double calcInfoGain(const Eigen::Vector3d& pt, const double& yaw); // 移植周指导FUEL的calcInfoGain
   void calcFovAABB(const Eigen::Matrix3d& R_wc, const Eigen::Vector3d& t_wc, // 算AABB的函数
                                  Eigen::Vector3i& lb, Eigen::Vector3i& ub);  
@@ -230,7 +232,9 @@ public:
   bool insideFoV(const Eigen::Vector3d& pw, const Eigen::Vector3d& pc, // 当前点是否在相机FOV中
                                const vector<Eigen::Vector3d>& normals);
   void boundBox(Eigen::Vector3d& low, Eigen::Vector3d& up);
-  void initCastFlag(const Eigen::Vector3d& pos);
+  void initCastFlag(const Eigen::Vector3d& pos); // 初始化raycast flag
+  void distToPathAndCurPos(const Eigen::Vector3d& check_pt, const Eigen::MatrixXd& ctrl_pts,
+                           std::pair<double, double>& dists, bool debug);
 
   typedef std::shared_ptr<GridMap> Ptr;
 
