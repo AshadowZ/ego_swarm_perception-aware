@@ -968,8 +968,8 @@ namespace ego_planner
       double yaw = 0;
       double best_yaw = 0, temp_yaw = 0, last_best_yaw = 0;
       bool is_select_meaningful = 0; // 如果所在viewpoint看到的地图全是未知，则yaw角选择无意义
-      double meaningful_threshold = 500; // 地图增益三百多，基本FOV内grid全是未知
-      double smo_degree = 40; // 光滑项的权重
+      double meaningful_threshold = 200; // 地图增益三百多，基本FOV内grid全是未知
+      double smo_degree = 30; // 光滑项的权重
 
       // 还是得转换为UniformBspline来计算
       Eigen::MatrixXd pos_pts(3, bspline.pos_pts.size());
@@ -1014,17 +1014,17 @@ namespace ego_planner
           best_yaw = yaw;
           planner_manager_->grid_map_->initCastFlag(pos);
           is_select_meaningful = 0; 
-          cout << "-------------------------" << endl;
+          // cout << "-------------------------" << endl;
           // Eigen::MatrixXd ctrl_pts = pos_traj.getControlPoint().transpose();
           gains.clear();
-          for(int j = 0; j < 5; ++j) { // 以速度切线对应的yaw角为中心，采样-45～45度的5个yaw角
-            temp_yaw = yaw + (j-2) * 0.262;
+          for(int j = 0; j < 5; ++j) { // 以速度切线对应的yaw角为中心，采样-30～30度的5个yaw角
+            temp_yaw = yaw + (j-2) * 0.20; // 0.262: 15度
             gain = planner_manager_->grid_map_->calcInformationGain(pos, temp_yaw);
             // 判断是否已经基本看到的都是未知
             if(gain < meaningful_threshold) is_select_meaningful = 1;
             gain = gain - smo_degree * abs(temp_yaw - last_best_yaw) ; // 加入光滑项
             gains.push_back(gain);
-            cout << "the yaw is: " << temp_yaw << ". gain of this viewpoint is: " << gains[j]  << endl;
+            // cout << "the yaw is: " << temp_yaw << ". gain of this viewpoint is: " << gains[j]  << endl;
           }
           if(!is_select_meaningful) { // 如果ray角选择无意义，则直接令其等于轨迹速度方向
             best_yaw = yaw;
@@ -1032,7 +1032,7 @@ namespace ego_planner
           } else {
             auto max_it = max_element(gains.begin(), gains.end());
             best_gain = *max_it;
-            best_yaw = yaw + (distance(gains.begin(), max_it) - 2) * 0.262;
+            best_yaw = yaw + (distance(gains.begin(), max_it) - 2) * 0.20;
           }
           last_best_yaw = best_yaw;
           if(best_yaw < -PI) {
@@ -1041,8 +1041,8 @@ namespace ego_planner
             temp_yaw -= 2 * PI;
           }
           bspline.yaw_pts.push_back(best_yaw);
-          cout << "best yaw is: " << best_yaw << endl;
-          cout << "gain of best yaw is: " << best_gain << endl;
+          // cout << "best yaw is: " << best_yaw << endl;
+          // cout << "gain of best yaw is: " << best_gain << endl;
       }
       
       cout << "yaw sequence is computed!" << endl;

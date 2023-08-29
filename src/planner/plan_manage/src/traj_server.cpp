@@ -241,7 +241,7 @@ std::pair<double, double> my_calculate_yaw(double t_cur)
 {
   constexpr double PI = 3.1415926;
   constexpr double YAW_DOT_MAX_PER_SEC = PI;
-  double max_yaw_change = YAW_DOT_MAX_PER_SEC * 0.05; // 这个每隔50ms触发一次
+  double max_yaw_change = YAW_DOT_MAX_PER_SEC * 0.01; // 这个每隔10ms触发一次
   std::pair<double, double> yaw_yawdot(0, 0);
   double yaw_temp = 0, yaw = 0, yawdot = 0, yaw_err = 0;
   int yaw_index = floor(t_cur / yaw_dt_); // 找出最近的yaw角离散点
@@ -283,7 +283,7 @@ std::pair<double, double> my_calculate_yaw(double t_cur)
       if (yaw - last_yaw_ > PI)
         yawdot = -YAW_DOT_MAX_PER_SEC;
       else
-        yawdot = (yaw_temp - last_yaw_) * 0.05;
+        yawdot = (yaw_temp - last_yaw_) / 0.01;
     }
   }
   else if (yaw_temp - last_yaw_ < -PI)
@@ -302,7 +302,7 @@ std::pair<double, double> my_calculate_yaw(double t_cur)
       if (yaw - last_yaw_ < -PI)
         yawdot = YAW_DOT_MAX_PER_SEC;
       else
-        yawdot = (yaw_temp - last_yaw_) * 0.05;
+        yawdot = (yaw_temp - last_yaw_) / 0.01;
     }
   }
   else
