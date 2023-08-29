@@ -235,46 +235,115 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros:
   yaw角的速度也是参考fast-tracker直接给一个0.01，就挺随意的
   但是这样直接work了，草
   to-do：测试一下yaw角的采样频率多少合适，写个插值算法，yaw角速率也参考上面那个函数算一下
+  to-do：真机模型晃得马都不认识了，进行一个修改，整出点平滑的轨迹
 */
 std::pair<double, double> my_calculate_yaw(double t_cur)
 {
   constexpr double PI = 3.1415926;
+  constexpr double YAW_DOT_MAX_PER_SEC = PI;
+  double max_yaw_change = YAW_DOT_MAX_PER_SEC * 0.05; // 这个每隔50ms触发一次
   std::pair<double, double> yaw_yawdot(0, 0);
-  double yaw = 0;
-  double yawdot = 0;
-  double yaw_err = 0;
+  double yaw_temp = 0, yaw = 0, yawdot = 0, yaw_err = 0;
   int yaw_index = floor(t_cur / yaw_dt_); // 找出最近的yaw角离散点
   yaw_index = min(yaw_index, int(yaw_traj_[0].rows())-1); // 防止越界，修了这里好像就没bug了
+  
+  // 简单的线性插值
+  if(yaw_index < int(yaw_traj_[0].rows())-1) {
+    yaw_err = yaw_traj_[0](yaw_index+1, 0) - yaw_traj_[0](yaw_index, 0);
+    if(yaw_err > PI) { // 防止yaw角翻转
+      yaw_err -= 2 * PI;
+      yaw_temp = yaw_traj_[0](yaw_index, 0) + (t_cur - yaw_dt_ * yaw_index) / yaw_dt_ * yaw_err;
+      if(yaw_temp < -PI) yaw_temp += 2 * PI;
+    } else if (yaw_err < -PI) {
+      yaw_err += 2 * PI;
+      yaw_temp = yaw_traj_[0](yaw_index, 0) + (t_cur - yaw_dt_ * yaw_index) / yaw_dt_ * yaw_err;
+     if(yaw_temp > PI) yaw_temp -= 2 * PI;
+    } else {
+      yaw_temp = yaw_traj_[0](yaw_index, 0) + (t_cur - yaw_dt_ * yaw_index) / yaw_dt_ * yaw_err;
+    }
+  } 
+  else {
+    yaw_temp = yaw_traj_[0](yaw_index, 0);
+  }
+  
+  // yawdot计算
+  if (yaw_temp - last_yaw_ > PI)
+  {
+    if (yaw_temp - last_yaw_ - 2 * PI < -max_yaw_change)
+    {
+      yaw = last_yaw_ - max_yaw_change;
+      if (yaw < -PI)
+        yaw += 2 * PI;
 
-  // if(yaw_index < int(yaw_traj_[0].rows())-1) { // 简单的线性插值
-  //   yaw_err = yaw_traj_[0](yaw_index+1, 0) - yaw_traj_[0](yaw_index, 0);
-  //   if(yaw_err > PI) {
-  //     yaw_err -= 2 * PI;
-  //     yaw = yaw_traj_[0](yaw_index, 0) + (t_cur - yaw_dt_ * yaw_index) / yaw_dt_ * yaw_err;
-  //     if(yaw < -PI) {
-  //       yaw += 2 * PI;
-  //     } else if(yaw > PI) {
-  //       yaw -= 2 * PI;
-  //     }
-  //   } else if (yaw_err < -PI) {
-  //     yaw_err += 2 * PI;
-  //     yaw_err = yaw_traj_[0](yaw_index+1, 0) - yaw_traj_[0](yaw_index, 0);
-  //     yaw = yaw_traj_[0](yaw_index, 0) + (t_cur - yaw_dt_ * yaw_index) / yaw_dt_ * yaw_err;
-  //     if(yaw < -PI) {
-  //       yaw += 2 * PI;
-  //     } else if(yaw > PI) {
-  //       yaw -= 2 * PI;
-  //     }
-  //   } else
-  //   yaw = yaw_traj_[0](yaw_index, 0) + (t_cur - yaw_dt_ * yaw_index) / yaw_dt_ * yaw_err;
-  // } else {
-  //   yaw = yaw_traj_[0](yaw_index, 0);
-  // }
-  yaw = yaw_traj_[0](yaw_index, 0);
+      yawdot = -YAW_DOT_MAX_PER_SEC;
+    }
+    else
+    {
+      yaw = yaw_temp;
+      if (yaw - last_yaw_ > PI)
+        yawdot = -YAW_DOT_MAX_PER_SEC;
+      else
+        yawdot = (yaw_temp - last_yaw_) * 0.05;
+    }
+  }
+  else if (yaw_temp - last_yaw_ < -PI)
+  {
+    if (yaw_temp - last_yaw_ + 2 * PI > max_yaw_change)
+    {
+      yaw = last_yaw_ + max_yaw_change;
+      if (yaw > PI)
+        yaw -= 2 * PI;
 
-  yawdot = 0.05; // 速度直接赋个0.01啥的，fast-tracker那篇就是这么干的
+      yawdot = YAW_DOT_MAX_PER_SEC;
+    }
+    else
+    {
+      yaw = yaw_temp;
+      if (yaw - last_yaw_ < -PI)
+        yawdot = YAW_DOT_MAX_PER_SEC;
+      else
+        yawdot = (yaw_temp - last_yaw_) * 0.05;
+    }
+  }
+  else
+  {
+    if (yaw_temp - last_yaw_ < -max_yaw_change)
+    {
+      yaw = last_yaw_ - max_yaw_change;
+      if (yaw < -PI)
+        yaw += 2 * PI;
+
+      yawdot = -YAW_DOT_MAX_PER_SEC;
+    }
+    else if (yaw_temp - last_yaw_ > max_yaw_change)
+    {
+      yaw = last_yaw_ + max_yaw_change;
+      if (yaw > PI)
+        yaw -= 2 * PI;
+
+      yawdot = YAW_DOT_MAX_PER_SEC;
+    }
+    else
+    {
+      yaw = yaw_temp;
+      if (yaw - last_yaw_ > PI)
+        yawdot = -YAW_DOT_MAX_PER_SEC;
+      else if (yaw - last_yaw_ < -PI)
+        yawdot = YAW_DOT_MAX_PER_SEC;
+      else
+        yawdot = (yaw_temp - last_yaw_) * 0.05;
+    }
+  }
+
+  if (fabs(yaw - last_yaw_) <= max_yaw_change)
+    yaw = 0.5 * last_yaw_ + 0.5 * yaw; // nieve LPF
+  yawdot = 0.5 * last_yaw_dot_ + 0.5 * yawdot;
+
   yaw_yawdot.first = yaw;
   yaw_yawdot.second = yawdot;
+
+  last_yaw_ = yaw;
+  last_yaw_dot_ = yawdot;
 
   return yaw_yawdot;
 }

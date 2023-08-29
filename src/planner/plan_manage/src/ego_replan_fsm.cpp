@@ -968,8 +968,8 @@ namespace ego_planner
       double yaw = 0;
       double best_yaw = 0, temp_yaw = 0, last_best_yaw = 0;
       bool is_select_meaningful = 0; // 如果所在viewpoint看到的地图全是未知，则yaw角选择无意义
-      double meaningful_threshold = 300; // 地图增益三百多，基本FOV内grid全是未知
-      double smo_degree = 30; // 光滑项的权重
+      double meaningful_threshold = 500; // 地图增益三百多，基本FOV内grid全是未知
+      double smo_degree = 40; // 光滑项的权重
 
       // 还是得转换为UniformBspline来计算
       Eigen::MatrixXd pos_pts(3, bspline.pos_pts.size());
