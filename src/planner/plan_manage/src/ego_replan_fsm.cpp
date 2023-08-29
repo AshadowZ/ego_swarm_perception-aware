@@ -1,5 +1,4 @@
 #include <plan_manage/ego_replan_fsm.h>
-#include <plan_manage/yaw_thread.h> // yaw角计算的函数
 
 namespace ego_planner
 {
@@ -798,7 +797,7 @@ namespace ego_planner
         ego_planner_node这块我慢慢想一想。
       */
       // yaw角计算
-      computeYawVel(bspline);
+      computeYawPer(bspline);
 
       /* 1. publish traj to traj_server */
       bspline_pub_.publish(bspline);
@@ -959,100 +958,81 @@ namespace ego_planner
 
   // 只要装填yaw_pts这一项应该就ok了，原来这个yaw_pts是指yaw角B样条轨迹的控制点，我把它当离散的yaw角真值发吧。
   // 时间间隔就100ms，由后面进行插值？
-  void EGOReplanFSM::computeYawVel(traj_utils::Bspline& bspline){
-      // yaw control
+  void EGOReplanFSM::computeYawVel(traj_utils::Bspline& bspline)
+  {
+      double yaw_dt = 0.1; // yaw角离散间隔100ms
+      
+      double yaw;
+      double t_cur, traj_duration_; // 轨迹总时间
+      int yaw_num = 0;
+      auto info = &planner_manager_->local_data_;
+
+      bspline.yaw_dt = yaw_dt;
+      traj_duration_ = info->position_traj_.getTimeSum();
+      yaw_num = floor(traj_duration_  / bspline.yaw_dt);
+      Eigen::Vector3d vel(Eigen::Vector3d::Zero());
+      for(int i = 0; i < yaw_num; ++i) {
+          t_cur = i * bspline.yaw_dt;
+          vel = info->velocity_traj_.evaluateDeBoorT(t_cur);
+          yaw = atan2(vel[1], vel[0]);
+          bspline.yaw_pts.push_back(yaw);
+      }
+  }
+
+  void EGOReplanFSM::computeYawPer(traj_utils::Bspline& bspline)
+  {
+      double yaw_dt = 0.2; // yaw角离散间隔100ms
+      int yaw_samples = 5; // 每个点yaw角采样个数
+      double smo_degree = 20; // 光滑项的权重
+
       constexpr double PI = 3.1415926;
       double t_cur;
       double traj_duration_; // 轨迹总时间
-      size_t yaw_num; // 离散yaw角的个数
-      double yaw = 0;
-      double best_yaw = 0, temp_yaw = 0, last_best_yaw = 0;
-      bool is_select_meaningful = 0; // 如果所在viewpoint看到的地图全是未知，则yaw角选择无意义
-      double meaningful_threshold = 200; // 地图增益三百多，基本FOV内grid全是未知
-      double smo_degree = 30; // 光滑项的权重
+      int yaw_num = 0;
+      double yaw, best_yaw, temp_yaw, last_best_yaw, yaw_smo_err;
 
-      // 还是得转换为UniformBspline来计算
-      Eigen::MatrixXd pos_pts(3, bspline.pos_pts.size());
-      Eigen::VectorXd knots(bspline.knots.size());
-      for (size_t i = 0; i < bspline.pos_pts.size(); ++i) // 取出位置控制点
-      {
-          pos_pts(0, i) = bspline.pos_pts[i].x;
-          pos_pts(1, i) = bspline.pos_pts[i].y;
-          pos_pts(2, i) = bspline.pos_pts[i].z;
-      }
-      for (size_t i = 0; i < bspline.knots.size(); ++i) // 取出节点时间信息
-      {
-          knots(i) = bspline.knots[i];
-      }
-      UniformBspline pos_traj(pos_pts, bspline.order, 0.1);
-      pos_traj.setKnot(knots); // 将轨迹使用UniformBspline类表示
-      UniformBspline vel_traj = pos_traj.getDerivative();
-
-      traj_duration_ = pos_traj.getTimeSum();
-      
-      // 计算yaw角，每100ms计算一个值
-      bspline.yaw_dt = 0.1;
+      auto info = &planner_manager_->local_data_;
+      traj_duration_ = info->position_traj_.getTimeSum();
+      bspline.yaw_dt = yaw_dt;
       yaw_num = floor(traj_duration_  / bspline.yaw_dt);
+
       double gain = 0; // 信息增益
-      double best_gain = 0;
       vector<double> gains;
       Eigen::Vector3d vel(Eigen::Vector3d::Zero()), pos(Eigen::Vector3d::Zero());
-      vel = vel_traj.evaluateDeBoorT(0);
+      vel = info->velocity_traj_.evaluateDeBoorT(0);
       last_best_yaw = atan2(vel[1], vel[0]);
-      for(size_t i = 0; i < yaw_num; ++i) {
+      for(int i = 0; i < yaw_num; ++i) {
           t_cur = i * bspline.yaw_dt;
-          vel = vel_traj.evaluateDeBoorT(t_cur);
-          pos = pos_traj.evaluateDeBoorT(t_cur);
-          yaw = atan2(vel[1], vel[0]); // yaw就是当前速度的切线方向
-          /*
-            to-do：
-            使用一些工程上的方法平滑yaw角轨迹，反复横跳是很灾难性的，后面的traj_server也要考虑动力学可行性
-            看看能不能减慢ego-planner生成的轨迹速度，或者让地图障碍物稀疏一点
-            飞机创进障碍物是yaw角转的不够及时，还是yaw角规划写的有问题，可能要考虑周指导带权重的那一版本信息增益实现
-          */
-          best_gain = 0;
+          vel = info->velocity_traj_.evaluateDeBoorT(t_cur);
+          pos = info->position_traj_.evaluateDeBoorT(t_cur);
+          yaw = atan2(vel[1], vel[0]);
+
           best_yaw = yaw;
           planner_manager_->grid_map_->initCastFlag(pos);
-          is_select_meaningful = 0; 
-          // cout << "-------------------------" << endl;
-          // Eigen::MatrixXd ctrl_pts = pos_traj.getControlPoint().transpose();
           gains.clear();
-          for(int j = 0; j < 5; ++j) { // 以速度切线对应的yaw角为中心，采样-30～30度的5个yaw角
-            temp_yaw = yaw + (j-2) * 0.20; // 0.262: 15度
-            gain = planner_manager_->grid_map_->calcInformationGain(pos, temp_yaw);
-            // 判断是否已经基本看到的都是未知
-            if(gain < meaningful_threshold) is_select_meaningful = 1;
-            gain = gain - smo_degree * abs(temp_yaw - last_best_yaw) ; // 加入光滑项
-            gains.push_back(gain);
-            // cout << "the yaw is: " << temp_yaw << ". gain of this viewpoint is: " << gains[j]  << endl;
+          for(int j = 0; j < yaw_samples; ++j) { // 以当前点的速度方向为中心采样yaw角
+              temp_yaw = yaw + (j - (yaw_samples-1)/2) * 0.20; // 0.262: 15度
+              if(temp_yaw < -PI) { // 限幅
+                temp_yaw += 2 * PI;
+              } else if(temp_yaw > PI) {
+                temp_yaw -= 2 * PI;
+              }
+              gain = planner_manager_->grid_map_->calcInformationGain(pos, temp_yaw);
+              yaw_smo_err = temp_yaw - last_best_yaw; // 光滑项
+              if(yaw_smo_err < -PI) { // 限幅
+                yaw_smo_err += 2 * PI;
+              } else if(yaw_smo_err > PI) {
+                yaw_smo_err -= 2 * PI;
+              }
+              gain = gain - smo_degree * abs(yaw_smo_err);
+              gains.push_back(gain);
           }
-          if(!is_select_meaningful) { // 如果ray角选择无意义，则直接令其等于轨迹速度方向
-            best_yaw = yaw;
-            best_gain = gains[2];
-          } else {
-            auto max_it = max_element(gains.begin(), gains.end());
-            best_gain = *max_it;
-            best_yaw = yaw + (distance(gains.begin(), max_it) - 2) * 0.20;
-          }
-          last_best_yaw = best_yaw;
-          if(best_yaw < -PI) {
-            best_yaw += 2 * PI;
-          } else if(best_yaw > PI) {
-            temp_yaw -= 2 * PI;
-          }
+
+          auto max_it = max_element(gains.begin(), gains.end());
+          best_yaw = yaw + (distance(gains.begin(), max_it) - 2) * 0.20;
           bspline.yaw_pts.push_back(best_yaw);
-          // cout << "best yaw is: " << best_yaw << endl;
-          // cout << "gain of best yaw is: " << best_gain << endl;
+          last_best_yaw = best_yaw;
       }
-      
-      cout << "yaw sequence is computed!" << endl;
-      cout << "traj_duration: " << traj_duration_ << endl;
-      cout << "Number of elements in yaw_pts: " << bspline.yaw_pts.size() << endl;
-      // cout << "First three elements in yaw_pts: ";
-      // for (size_t i = 0; i < std::min(bspline.yaw_pts.size(), static_cast<size_t>(3)); ++i) {
-      //     cout << bspline.yaw_pts[i] << " ";
-      // }
-      cout << endl;
   }
 
 } // namespace ego_planner

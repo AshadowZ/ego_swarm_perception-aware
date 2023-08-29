@@ -113,6 +113,7 @@ namespace ego_planner
     void publishSwarmTrajs(bool startup_pub);
 
     void computeYawVel(traj_utils::Bspline& bspline); // 我定义的函数
+    void computeYawPer(traj_utils::Bspline& bspline); // 我定义的函数
      
   public:
     EGOReplanFSM(/* args */)

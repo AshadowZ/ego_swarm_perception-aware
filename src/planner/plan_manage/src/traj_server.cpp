@@ -231,16 +231,13 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros:
 }
 
 /*
-  一个非常naive的yaw角计算，直接找离当前时刻采样点最近的一个yaw角
-  yaw角的速度也是参考fast-tracker直接给一个0.01，就挺随意的
-  但是这样直接work了，草
   to-do：测试一下yaw角的采样频率多少合适，写个插值算法，yaw角速率也参考上面那个函数算一下
   to-do：真机模型晃得马都不认识了，进行一个修改，整出点平滑的轨迹
 */
 std::pair<double, double> my_calculate_yaw(double t_cur)
 {
   constexpr double PI = 3.1415926;
-  constexpr double YAW_DOT_MAX_PER_SEC = PI;
+  constexpr double YAW_DOT_MAX_PER_SEC = PI / 4 * 3;
   double max_yaw_change = YAW_DOT_MAX_PER_SEC * 0.01; // 这个每隔10ms触发一次
   std::pair<double, double> yaw_yawdot(0, 0);
   double yaw_temp = 0, yaw = 0, yawdot = 0, yaw_err = 0;

@@ -60,7 +60,7 @@
 
     <!-- planning fsm -->
     <param name="fsm/flight_type" value="$(arg flight_type)" type="int"/>
-    <param name="fsm/thresh_replan_time" value="1.8" type="double"/> <!--因为replan触发太过频繁，原1s现延长-->
+    <param name="fsm/thresh_replan_time" value="2.1" type="double"/> <!--因为replan触发太过频繁，原1s现延长-->
     <param name="fsm/thresh_no_replan_meter" value="1.0" type="double"/>
     <param name="fsm/planning_horizon" value="$(arg planning_horizon)" type="double"/> <!--always set to 1.5 times grater than sensing horizen-->
     <param name="fsm/planning_horizen_time" value="3" type="double"/>
