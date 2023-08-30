@@ -237,7 +237,7 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros:
 std::pair<double, double> my_calculate_yaw(double t_cur)
 {
   constexpr double PI = 3.1415926;
-  constexpr double YAW_DOT_MAX_PER_SEC = PI / 4 * 3;
+  constexpr double YAW_DOT_MAX_PER_SEC = PI;
   double max_yaw_change = YAW_DOT_MAX_PER_SEC * 0.01; // 这个每隔10ms触发一次
   std::pair<double, double> yaw_yawdot(0, 0);
   double yaw_temp = 0, yaw = 0, yawdot = 0, yaw_err = 0;
@@ -328,16 +328,16 @@ std::pair<double, double> my_calculate_yaw(double t_cur)
       else if (yaw - last_yaw_ < -PI)
         yawdot = YAW_DOT_MAX_PER_SEC;
       else
-        yawdot = (yaw_temp - last_yaw_) * 0.05;
+        yawdot = (yaw_temp - last_yaw_) / 0.01;
     }
   }
 
-  if (fabs(yaw - last_yaw_) <= max_yaw_change)
-    yaw = 0.5 * last_yaw_ + 0.5 * yaw; // nieve LPF
-  yawdot = 0.5 * last_yaw_dot_ + 0.5 * yawdot;
+  // if (fabs(yaw - last_yaw_) <= max_yaw_change)
+  //   yaw = 0.5 * last_yaw_ + 0.5 * yaw; // nieve LPF
+  // yawdot = 0.5 * last_yaw_dot_ + 0.5 * yawdot;
 
   yaw_yawdot.first = yaw;
-  yaw_yawdot.second = yawdot;
+  yaw_yawdot.second = 0.01;
 
   last_yaw_ = yaw;
   last_yaw_dot_ = yawdot;
@@ -364,9 +364,6 @@ void cmdCallback(const ros::TimerEvent &e)
     vel = traj_[1].evaluateDeBoorT(t_cur);
     acc = traj_[2].evaluateDeBoorT(t_cur);
 
-    // 只需要修改这里就ok了，把yaw角变成我们自己规划的一连串yaw角。
-    // 比如traj_server这个节点是用来接收B样条轨迹的，我们自己起一个节点，它接收B样条轨迹，在此基础上加上yaw角的规划。
-    // 然后它把B样条轨迹配套上yaw角的规划一并发过来。
     /*** calculate yaw ***/
     // yaw_yawdot = calculate_yaw(t_cur, pos, time_now, time_last);
     yaw_yawdot = my_calculate_yaw(t_cur);

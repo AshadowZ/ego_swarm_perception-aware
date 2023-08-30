@@ -114,6 +114,7 @@ namespace ego_planner
 
     void computeYawVel(traj_utils::Bspline& bspline); // 我定义的函数
     void computeYawPer(traj_utils::Bspline& bspline); // 我定义的函数
+    void computeYawDemo(traj_utils::Bspline& bspline); // 我定义的函数
      
   public:
     EGOReplanFSM(/* args */)

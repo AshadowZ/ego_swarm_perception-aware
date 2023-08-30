@@ -797,7 +797,7 @@ namespace ego_planner
         ego_planner_node这块我慢慢想一想。
       */
       // yaw角计算
-      computeYawPer(bspline);
+      computeYawDemo(bspline);
 
       /* 1. publish traj to traj_server */
       bspline_pub_.publish(bspline);
@@ -971,17 +971,32 @@ namespace ego_planner
       traj_duration_ = info->position_traj_.getTimeSum();
       yaw_num = floor(traj_duration_  / bspline.yaw_dt);
       Eigen::Vector3d vel(Eigen::Vector3d::Zero());
+      Eigen::Vector3d pos(Eigen::Vector3d::Zero());
+      double gain = 0, dis = 0;
+      Eigen::Vector3d start_pt(Eigen::Vector3d::Zero()), end_pt(Eigen::Vector3d::Zero());
       for(int i = 0; i < yaw_num; ++i) {
           t_cur = i * bspline.yaw_dt;
           vel = info->velocity_traj_.evaluateDeBoorT(t_cur);
+          pos = info->position_traj_.evaluateDeBoorT(t_cur);
           yaw = atan2(vel[1], vel[0]);
           bspline.yaw_pts.push_back(yaw);
+
+          planner_manager_->grid_map_->initCastFlag(pos);
+          gain = planner_manager_->grid_map_->calcInformationGain(pos, yaw);
+          cout << "current pos is: " << pos.transpose() << endl;
+          cout << "gain of yaw is: " << gain << endl;
       }
+      start_pt = info->position_traj_.evaluateDeBoorT(0);
+      end_pt = info->position_traj_.evaluateDeBoorT(yaw_num * bspline.yaw_dt);
+      cout << "start point: " << start_pt.transpose() << endl;
+      cout << "end point: " << end_pt.transpose() << endl;
+      cout <<  "dis: " << (start_pt-end_pt).norm() << endl;
+      cout << "total traj duration: " << traj_duration_ << endl; 
   }
 
   void EGOReplanFSM::computeYawPer(traj_utils::Bspline& bspline)
   {
-      double yaw_dt = 0.2; // yaw角离散间隔100ms
+      double yaw_dt = 0.1; // yaw角离散间隔100ms
       int yaw_samples = 5; // 每个点yaw角采样个数
       double smo_degree = 20; // 光滑项的权重
 
@@ -1032,7 +1047,50 @@ namespace ego_planner
           best_yaw = yaw + (distance(gains.begin(), max_it) - 2) * 0.20;
           bspline.yaw_pts.push_back(best_yaw);
           last_best_yaw = best_yaw;
+
+          cout << "best gain: " << *max_it << endl;
       }
+      cout << "total traj duration: " << traj_duration_ << endl; 
+  }
+
+  void EGOReplanFSM::computeYawDemo(traj_utils::Bspline& bspline)
+  {
+      double yaw_dt = 0.1; // yaw角离散间隔100ms
+
+      constexpr double PI = 3.1415926;
+      double t_cur;
+      double traj_duration_; // 轨迹总时间
+      int yaw_num = 0;
+      double turn_time = 0.5; // 转弯时间
+      double reco_time = 0.5; // 识别时间
+
+      auto info = &planner_manager_->local_data_;
+      traj_duration_ = info->position_traj_.getTimeSum();
+      bspline.yaw_dt = yaw_dt;
+      yaw_num = floor(traj_duration_  / bspline.yaw_dt);
+
+      double yaw;
+      Eigen::Vector3d start_pt(Eigen::Vector3d::Zero()), end_pt(Eigen::Vector3d::Zero());
+      // 一般来说1s多就会跑到未知的轨迹
+      for(int i = 0; i < yaw_num; ++i) {
+          t_cur = i * bspline.yaw_dt;
+          if(t_cur < turn_time) {
+            yaw = t_cur * 1.57 / turn_time; // 向右转90度
+          } else if (t_cur >=turn_time && t_cur < turn_time+reco_time) {
+            yaw = 1.57;
+          } else if (t_cur >= turn_time+reco_time && t_cur < 2*turn_time+reco_time) {
+            yaw = (2*turn_time+reco_time - t_cur) * 1.57/0.5;
+          } else {
+            yaw = 0;
+          }
+          bspline.yaw_pts.push_back(yaw);
+      }
+      start_pt = info->position_traj_.evaluateDeBoorT(0);
+      end_pt = info->position_traj_.evaluateDeBoorT(yaw_num * bspline.yaw_dt);
+      cout << "start point: " << start_pt.transpose() << endl;
+      cout << "end point: " << end_pt.transpose() << endl;
+      cout << "dis: " << (start_pt-end_pt).norm() << endl;
+      cout << "total traj duration: " << traj_duration_ << endl; 
   }
 
 } // namespace ego_planner
