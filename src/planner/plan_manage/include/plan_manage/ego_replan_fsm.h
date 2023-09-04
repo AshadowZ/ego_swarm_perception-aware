@@ -115,6 +115,8 @@ namespace ego_planner
     void computeYawVel(traj_utils::Bspline& bspline); // 我定义的函数
     void computeYawPer(traj_utils::Bspline& bspline); // 我定义的函数
     void computeYawDemo(traj_utils::Bspline& bspline); // 我定义的函数
+    void computeYawTurn(traj_utils::Bspline& bspline, int dir); // 本段轨迹转弯做飞机观测，dir: 1向左，-1向右
+
      
   public:
     EGOReplanFSM(/* args */)

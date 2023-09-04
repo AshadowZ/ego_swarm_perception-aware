@@ -16,7 +16,7 @@
   <arg name="odom_topic"/>
 
   <!-- number of moving objects -->
-  <arg name="obj_num" value="10" />
+  <arg name="obj_num" value="3" />
 
   <!-- main algorithm params -->
   <include file="$(find ego_planner)/launch/advanced_param.xml">
@@ -47,8 +47,8 @@
     <arg name="fy" value="387.229248046875"/>
 
     <!-- maximum velocity and acceleration the drone will reach -->
-    <arg name="max_vel" value="0.5" /> <!-- 速度改小？没作用 -->
-    <arg name="max_acc" value="1.5" />
+    <arg name="max_vel" value="1.5" /> <!-- 速度改小？没作用 -->
+    <arg name="max_acc" value="4" />
 
     <!--always set to 1.5 times grater than sensing horizen-->
     <arg name="planning_horizon" value="7.5" /> 

@@ -231,7 +231,6 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros:
 }
 
 /*
-  to-do：测试一下yaw角的采样频率多少合适，写个插值算法，yaw角速率也参考上面那个函数算一下
   to-do：真机模型晃得马都不认识了，进行一个修改，整出点平滑的轨迹
 */
 std::pair<double, double> my_calculate_yaw(double t_cur)

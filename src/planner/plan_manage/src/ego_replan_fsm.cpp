@@ -716,7 +716,7 @@ namespace ego_planner
         Eigen::Vector3d swarm_pridicted = planner_manager_->swarm_trajs_buf_.at(id).position_traj_.evaluateDeBoorT(t_X);
         double dist = (p_cur - swarm_pridicted).norm();
 
-        if (dist < CLEARANCE)
+        if (dist < CLEARANCE) // 默认为0.5
         {
           occ = true;
           break;
@@ -791,11 +791,6 @@ namespace ego_planner
         bspline.knots.push_back(knots(i)); // knot是啥？u_只是个一维向量，好像是用于存放节点间的时间间隔
       }
 
-      /*
-        在这里加上yaw角的规划吗？
-        明天我把速度跟踪放这，先把traj_server那块写好。
-        ego_planner_node这块我慢慢想一想。
-      */
       // yaw角计算
       computeYawDemo(bspline);
 
@@ -972,7 +967,7 @@ namespace ego_planner
       yaw_num = floor(traj_duration_  / bspline.yaw_dt);
       Eigen::Vector3d vel(Eigen::Vector3d::Zero());
       Eigen::Vector3d pos(Eigen::Vector3d::Zero());
-      double gain = 0, dis = 0;
+      // double gain = 0, dis = 0;
       Eigen::Vector3d start_pt(Eigen::Vector3d::Zero()), end_pt(Eigen::Vector3d::Zero());
       for(int i = 0; i < yaw_num; ++i) {
           t_cur = i * bspline.yaw_dt;
@@ -981,17 +976,17 @@ namespace ego_planner
           yaw = atan2(vel[1], vel[0]);
           bspline.yaw_pts.push_back(yaw);
 
-          planner_manager_->grid_map_->initCastFlag(pos);
-          gain = planner_manager_->grid_map_->calcInformationGain(pos, yaw);
-          cout << "current pos is: " << pos.transpose() << endl;
-          cout << "gain of yaw is: " << gain << endl;
+          // planner_manager_->grid_map_->initCastFlag(pos);
+          // gain = planner_manager_->grid_map_->calcInformationGain(pos, yaw);
+          // cout << "current pos is: " << pos.transpose() << endl;
+          // cout << "gain of yaw is: " << gain << endl;
       }
-      start_pt = info->position_traj_.evaluateDeBoorT(0);
-      end_pt = info->position_traj_.evaluateDeBoorT(yaw_num * bspline.yaw_dt);
-      cout << "start point: " << start_pt.transpose() << endl;
-      cout << "end point: " << end_pt.transpose() << endl;
-      cout <<  "dis: " << (start_pt-end_pt).norm() << endl;
-      cout << "total traj duration: " << traj_duration_ << endl; 
+      // start_pt = info->position_traj_.evaluateDeBoorT(0);
+      // end_pt = info->position_traj_.evaluateDeBoorT(yaw_num * bspline.yaw_dt);
+      // cout << "start point: " << start_pt.transpose() << endl;
+      // cout << "end point: " << end_pt.transpose() << endl;
+      // cout <<  "dis: " << (start_pt-end_pt).norm() << endl;
+      // cout << "total traj duration: " << traj_duration_ << endl; 
   }
 
   void EGOReplanFSM::computeYawPer(traj_utils::Bspline& bspline)
@@ -1016,7 +1011,8 @@ namespace ego_planner
       Eigen::Vector3d vel(Eigen::Vector3d::Zero()), pos(Eigen::Vector3d::Zero());
       vel = info->velocity_traj_.evaluateDeBoorT(0);
       last_best_yaw = atan2(vel[1], vel[0]);
-      for(int i = 0; i < yaw_num; ++i) {
+      for(int i = 0; i < yaw_num; ++i) 
+      {
           t_cur = i * bspline.yaw_dt;
           vel = info->velocity_traj_.evaluateDeBoorT(t_cur);
           pos = info->position_traj_.evaluateDeBoorT(t_cur);
@@ -1053,44 +1049,120 @@ namespace ego_planner
       cout << "total traj duration: " << traj_duration_ << endl; 
   }
 
+  // 每次查看周围飞机，如果有飞机在自己前方一定范围内，检查自己轨迹的安全时间。
+  // 若安全时间足够长，本段轨迹实行观测动作。
   void EGOReplanFSM::computeYawDemo(traj_utils::Bspline& bspline)
   {
-      double yaw_dt = 0.1; // yaw角离散间隔100ms
+      double view_clearance = 5.5; // 5m之内飞机均可互相观察
 
-      constexpr double PI = 3.1415926;
-      double t_cur;
-      double traj_duration_; // 轨迹总时间
-      int yaw_num = 0;
-      double turn_time = 0.5; // 转弯时间
-      double reco_time = 0.5; // 识别时间
+      double traj_duration; // 轨迹总时间
 
       auto info = &planner_manager_->local_data_;
-      traj_duration_ = info->position_traj_.getTimeSum();
-      bspline.yaw_dt = yaw_dt;
-      yaw_num = floor(traj_duration_  / bspline.yaw_dt);
+      traj_duration = info->position_traj_.getTimeSum();
+      // cout << "traj_duration is:" << traj_duration << endl;
+      if (traj_duration < 3.5) { // 轨迹总时间必须长于一定阈值
+          computeYawVel(bspline);
+          return ;
+      }
 
-      double yaw;
-      Eigen::Vector3d start_pt(Eigen::Vector3d::Zero()), end_pt(Eigen::Vector3d::Zero());
-      // 一般来说1s多就会跑到未知的轨迹
-      for(int i = 0; i < yaw_num; ++i) {
-          t_cur = i * bspline.yaw_dt;
-          if(t_cur < turn_time) {
-            yaw = t_cur * 1.57 / turn_time; // 向右转90度
-          } else if (t_cur >=turn_time && t_cur < turn_time+reco_time) {
-            yaw = 1.57;
-          } else if (t_cur >= turn_time+reco_time && t_cur < 2*turn_time+reco_time) {
-            yaw = (2*turn_time+reco_time - t_cur) * 1.57/0.5;
-          } else {
-            yaw = 0;
+      double t_cur_global = info->start_time_.toSec() + 0.8; // naive：查看该轨迹0.8s后与其他飞机的距离
+      Eigen::Vector3d p_cur = info->position_traj_.evaluateDeBoorT(0.8); // 该轨迹0.8s后的位置
+      Eigen::Vector3d v_cur = info->velocity_traj_.evaluateDeBoorT(0.8); // 该轨迹0.8s后的速度
+      int left_num, right_num; // 左右能看的飞机数量
+      bool to_view = false;
+      left_num = 0; right_num = 0;
+
+      // cout << "swarm_trajs_buf_ size is:" << planner_manager_->swarm_trajs_buf_.size() << endl;
+      if (planner_manager_->swarm_trajs_buf_.size() == 0) { // 只有一台
+          computeYawVel(bspline);
+          return ;
+      }
+
+      for (size_t id = 0; id < planner_manager_->swarm_trajs_buf_.size(); id++)
+      {
+          if ((planner_manager_->swarm_trajs_buf_.at(id).drone_id != (int)id) || (planner_manager_->swarm_trajs_buf_.at(id).drone_id == planner_manager_->pp_.drone_id))
+          {
+            continue;
           }
+
+          double t_X = t_cur_global - planner_manager_->swarm_trajs_buf_.at(id).start_time_.toSec();
+          Eigen::Vector3d swarm_predicted = planner_manager_->swarm_trajs_buf_.at(id).position_traj_.evaluateDeBoorT(t_X); // 当前轨迹执行0.8s后预测其他飞机的位置
+          
+          // cout << "p_cur:" << p_cur.transpose() << endl;
+          // cout << "swarm_pred:" << swarm_predicted.transpose() << endl;
+
+          double dist = (p_cur - swarm_predicted).norm(); // 与预测飞机距离
+          
+          Eigen::Vector2d v1((swarm_predicted - p_cur)[0], (swarm_predicted - p_cur)[1]); // 看向飞机的方向
+          Eigen::Vector2d v2(v_cur[0], v_cur[1]); // 自身切线方向
+          
+          // cout << "v1:" << v1.transpose() << endl;
+          // cout << "v2:" << v2.transpose() << endl;
+
+          if (dist < view_clearance && v1.dot(v2) > 0) { // 飞机在前方且可以观测
+              // if () // 先不考虑安全时间的问题
+              to_view = true;
+              if ((v1.x() * v2.y() - v1.y() * v2.x()) < 0) left_num++; // v1在v2左边
+              else right_num++;
+          }
+      }
+      // cout << "to_view: " << to_view << endl;
+      // cout << "left_num: " << left_num << endl;
+      // cout << "right_num: " << right_num << endl;
+      if (to_view) {
+          if (left_num >= right_num) { // 向左看
+              computeYawTurn(bspline, 1);
+              cout << "drone"<< planner_manager_->pp_.drone_id << " turn left!" << endl;
+          } else { // 向右看
+              computeYawTurn(bspline, -1);
+              cout << "drone"<< planner_manager_->pp_.drone_id << " turn right!" << endl;
+          }
+      } else {
+          // 跟随切线方向  
+          computeYawVel(bspline);
+          cout << "drone"<< planner_manager_->pp_.drone_id << " remain!" << endl;
+      } 
+  }
+
+  void EGOReplanFSM::computeYawTurn(traj_utils::Bspline& bspline, int dir) {
+      constexpr double PI = 3.1415926;
+      double turn_time = 0.5, reco_time = 0.5, turn_ang = 60 * PI / 180; // 转弯时间，识别时间，转弯角度
+      double yaw_dt = 0.1; // yaw角离散间隔0.1s
+     
+      double t_cur, traj_duration;
+      int yaw_num;
+      auto info = &planner_manager_->local_data_;
+      traj_duration = info->position_traj_.getTimeSum();
+      bspline.yaw_dt = yaw_dt;
+      yaw_num = floor(traj_duration  / bspline.yaw_dt);
+
+      Eigen::Vector3d vel(Eigen::Vector3d::Zero());
+      double yaw;
+      for(int i = 0; i < yaw_num; ++i) 
+      {
+          t_cur = i * bspline.yaw_dt;
+
+          vel = info->velocity_traj_.evaluateDeBoorT(t_cur);
+          yaw = atan2(vel[1], vel[0]); // 当前切线速度方向
+          if (t_cur <= 2*turn_time+reco_time) {
+              if (t_cur <= turn_time) {
+                yaw = yaw + t_cur / turn_time * turn_ang * dir;
+              } else if (t_cur > turn_time && t_cur <= turn_time+reco_time) {
+                yaw = yaw + turn_ang*dir;
+              } else if (t_cur > turn_time+reco_time && t_cur <= 2*turn_time+reco_time) {
+                yaw = yaw + (2*turn_time+reco_time - t_cur) / turn_time * turn_ang * dir;
+              }
+          }
+
+          if(yaw < -PI) { // 限幅
+              yaw += 2 * PI;
+          } else if(yaw > PI) {
+              yaw -= 2 * PI;
+          }
+
           bspline.yaw_pts.push_back(yaw);
       }
-      start_pt = info->position_traj_.evaluateDeBoorT(0);
-      end_pt = info->position_traj_.evaluateDeBoorT(yaw_num * bspline.yaw_dt);
-      cout << "start point: " << start_pt.transpose() << endl;
-      cout << "end point: " << end_pt.transpose() << endl;
-      cout << "dis: " << (start_pt-end_pt).norm() << endl;
-      cout << "total traj duration: " << traj_duration_ << endl; 
+
   }
 
 } // namespace ego_planner
