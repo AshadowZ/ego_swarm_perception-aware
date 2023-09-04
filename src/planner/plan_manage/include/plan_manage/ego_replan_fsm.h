@@ -112,10 +112,10 @@ namespace ego_planner
     bool checkCollision();
     void publishSwarmTrajs(bool startup_pub);
 
-    void computeYawVel(traj_utils::Bspline& bspline); // 我定义的函数
-    void computeYawPer(traj_utils::Bspline& bspline); // 我定义的函数
-    void computeYawDemo(traj_utils::Bspline& bspline); // 我定义的函数
-    void computeYawTurn(traj_utils::Bspline& bspline, int dir); // 本段轨迹转弯做飞机观测，dir: 1向左，-1向右
+    void computeYawVel(traj_utils::Bspline& bspline); // yaw角跟随速度切线方向
+    // void computeYawPer(traj_utils::Bspline& bspline); // 我定义的函数
+    void computeYawDemo(traj_utils::Bspline& bspline); // 简单的控yaw角互相观测
+    void computeYawTurn(traj_utils::Bspline& bspline, int dir, double ang); // 本段轨迹转弯做飞机观测，dir: 1向左，-1向右，ang旋转角度
 
      
   public:
